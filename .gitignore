@@ -1,3 +1,4 @@
+docker-compose-dch.yaml
 .env
 .env.*
 *.env
