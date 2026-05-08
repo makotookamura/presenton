@@ -31,8 +31,7 @@ FROM node:20-bookworm-slim AS nextjs-builder
 
 WORKDIR /app/servers/nextjs
 
-ENV NEXT_TELEMETRY_DISABLED=1 \
-    PUPPETEER_SKIP_DOWNLOAD=true
+ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY servers/nextjs/package.json servers/nextjs/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
@@ -71,7 +70,6 @@ FROM python:3.11-slim-trixie AS runtime
 
 WORKDIR /app
 
-ARG INSTALL_CHROMIUM=true
 ARG INSTALL_TESSERACT=true
 ARG INSTALL_LIBREOFFICE=true
 
@@ -88,9 +86,8 @@ ENV APP_DATA_DIRECTORY=/app_data \
     START_OLLAMA=false
 
 RUN set -eux; \
-    packages="ca-certificates curl nginx fontconfig imagemagick zstd"; \
+    packages="ca-certificates curl nginx fontconfig chromium imagemagick zstd"; \
     if [ "$INSTALL_LIBREOFFICE" = "true" ]; then packages="$packages libreoffice"; fi; \
-    if [ "$INSTALL_CHROMIUM" = "true" ]; then packages="$packages chromium"; fi; \
     if [ "$INSTALL_TESSERACT" = "true" ]; then packages="$packages tesseract-ocr tesseract-ocr-eng"; fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends $packages; \
@@ -113,6 +110,7 @@ COPY --from=nextjs-builder /app/servers/nextjs/public /app/servers/nextjs/public
 COPY --from=nextjs-builder /app/servers/nextjs/.next-build/static /app/servers/nextjs/.next-build/static
 
 COPY start.js LICENSE NOTICE ./
+COPY scripts/presenton-terminal-banner.mjs /app/scripts/presenton-terminal-banner.mjs
 COPY nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
