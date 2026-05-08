@@ -25,7 +25,6 @@ import { useDispatch, useSelector } from "react-redux";
 
 import { RootState } from "@/store/store";
 import { toast } from "sonner";
-import { PptxPresentationModel } from "@/types/pptx_models";
 import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 import { usePresentationUndoRedo } from "../hooks/PresentationUndoRedo";
 import ToolTip from "@/components/ToolTip";
@@ -181,10 +180,21 @@ const PresentationHeader = ({
     titleBlurIntentRef.current = "cancel";
   };
 
-  const get_presentation_pptx_model = async (id: string): Promise<PptxPresentationModel> => {
-    const response = await fetch(`/api/presentation_to_pptx_model?id=${id}`);
-    const pptx_model = await response.json();
-    return pptx_model;
+  const exportViaIpc = async (
+    format: "pptx" | "pdf",
+    title: string
+  ): Promise<void> => {
+    if (!window.electron?.exportPresentation) {
+      throw new Error("Electron export bridge is unavailable");
+    }
+    const result = await window.electron.exportPresentation(
+      presentation_id,
+      title,
+      format
+    );
+    if (!result?.success) {
+      throw new Error(result?.message || "Export failed");
+    }
   };
 
   const handleExportPptx = async () => {
@@ -201,25 +211,33 @@ const PresentationHeader = ({
       setIsExporting(true);
       // Save the presentation data before exporting
       await PresentationGenerationApi.updatePresentationContent(presentationData);
-
-      const pptx_model = await get_presentation_pptx_model(presentation_id);
-      if (!pptx_model) {
-        throw new Error("Failed to get presentation PPTX model");
-      }
       const safePptxFileName = buildSafeExportFileName(
         presentationData?.title,
         "pptx"
       );
       const safePptxTitle = safePptxFileName.replace(/\.pptx$/i, "");
-      const pptx_path = await PresentationGenerationApi.exportAsPPTX({
-        ...pptx_model,
-        name: safePptxTitle,
-      });
-      if (pptx_path) {
-        // window.open(pptx_path, '_self');
-        downloadLink(pptx_path, safePptxFileName);
+      if (window.electron?.exportPresentation) {
+        await exportViaIpc("pptx", safePptxTitle);
       } else {
-        throw new Error("No path returned from export");
+        const response = await fetch("/api/export-presentation", {
+          method: "POST",
+          body: JSON.stringify({
+            format: "pptx",
+            id: presentation_id,
+            title: safePptxTitle,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to export PPTX");
+        }
+
+        const { path: pptxPath } = await response.json();
+        if (!pptxPath) {
+          throw new Error("No path returned from export");
+        }
+
+        downloadLink(pptxPath, safePptxFileName);
       }
     } catch (error) {
       console.error("Export failed:", error);
@@ -251,22 +269,25 @@ const PresentationHeader = ({
         "pdf"
       );
       const safePdfTitle = safePdfFileName.replace(/\.pdf$/i, "");
-      const response = await fetch('/api/export-as-pdf', {
-        method: 'POST',
-        body: JSON.stringify({
-          id: presentation_id,
-          title: safePdfTitle,
-        })
-      });
-
-      if (response.ok) {
-        const { path: pdfPath } = await response.json();
-        // window.open(pdfPath, '_blank');
-        downloadLink(pdfPath, safePdfFileName);
+      if (window.electron?.exportPresentation) {
+        await exportViaIpc("pdf", safePdfTitle);
       } else {
-        throw new Error("Failed to export PDF");
-      }
+        const response = await fetch("/api/export-presentation", {
+          method: "POST",
+          body: JSON.stringify({
+            format: "pdf",
+            id: presentation_id,
+            title: safePdfTitle,
+          }),
+        });
 
+        if (response.ok) {
+          const { path: pdfPath } = await response.json();
+          downloadLink(pdfPath, safePdfFileName);
+        } else {
+          throw new Error("Failed to export PDF");
+        }
+      }
     } catch (err) {
       console.error(err);
       toast.error("Having trouble exporting!", {
@@ -416,12 +437,18 @@ const PresentationHeader = ({
 
   return (
     <>
-      <div className="py-7 sticky top-0 bg-white z-50 mb-[17px] font-syne flex justify-between items-center gap-4">
-        {presentationData && !isStreaming && !isEditingTitle ? (
-          <ToolTip content="Rename presentation">{titleBlock}</ToolTip>
-        ) : (
-          titleBlock
-        )}
+      <div className="py-[18px] px-4 sticky top-0 bg-white z-50 shadow-sm font-syne flex justify-between items-center gap-4">
+        <div className="flex items-center gap-3">
+
+          <img onClick={() => {
+            router.push("/dashboard");
+          }} src="/logo-with-bg.png" alt="" className="w-10 h-10 cursor-pointer object-contain" />
+          {presentationData && !isStreaming && !isEditingTitle ? (
+            <ToolTip content="Rename presentation">{titleBlock}</ToolTip>
+          ) : (
+            titleBlock
+          )}
+        </div>
 
         <div className="flex items-center gap-2.5">
 

@@ -1,5 +1,9 @@
 // Utility to get the FastAPI base URL
 export function getFastAPIUrl(): string {
+  if (typeof window !== "undefined" && window.env?.NEXT_PUBLIC_FAST_API) {
+    return window.env.NEXT_PUBLIC_FAST_API;
+  }
+
   if (process.env.NEXT_PUBLIC_FAST_API) {
     return process.env.NEXT_PUBLIC_FAST_API;
   }
@@ -43,6 +47,10 @@ function withLeadingSlash(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
+function isElectronRuntime(): boolean {
+  return typeof window !== "undefined" && !!window.electron;
+}
+
 // Utility to construct API URL for Docker/web runtime.
 export function getApiUrl(path: string): string {
   if (isAbsoluteHttpUrl(path)) {
@@ -51,16 +59,50 @@ export function getApiUrl(path: string): string {
 
   const normalizedPath = withLeadingSlash(path);
   const isFastApiEndpoint = normalizedPath.startsWith("/api/v1/");
-  const hasConfiguredFastApi =
-    !!process.env.NEXT_PUBLIC_FAST_API || !!getFastApiUrlFromQuery();
+  const hasConfiguredFastApi = !!process.env.NEXT_PUBLIC_FAST_API;
+  const hasWindowFastApi =
+    typeof window !== "undefined" && !!window.env?.NEXT_PUBLIC_FAST_API;
+  const hasQueryFastApi = !!getFastApiUrlFromQuery();
 
   // In web/docker, /api/v1 is typically reverse-proxied by the web server.
-  // If a FastAPI origin is explicitly configured, use it instead of same-origin proxy.
-  if (isFastApiEndpoint && hasConfiguredFastApi) {
+  // Keep browser requests same-origin so session cookies stay attached by default.
+  // For Electron split-port runtime and query-overrides, target FastAPI directly.
+  // Server-side callers can still use configured FastAPI base URLs directly.
+  if (
+    isFastApiEndpoint &&
+    (isElectronRuntime() || hasWindowFastApi || hasQueryFastApi)
+  ) {
+    return `${getFastAPIUrl()}${normalizedPath}`;
+  }
+
+  if (
+    isFastApiEndpoint &&
+    typeof window === "undefined" &&
+    hasConfiguredFastApi
+  ) {
     return `${getFastAPIUrl()}${normalizedPath}`;
   }
 
   return normalizedPath;
+}
+
+/**
+ * getApiUrl may return a path without host (e.g. `/api/v1/...`). A single-argument
+ * `new URL("/api/...")` call is invalid; use this before `new URL(..., ...)`-style
+ * builds or to obtain an absolute string for `URL` + `searchParams`.
+ */
+export function buildAbsoluteApiRequestUrl(
+  path: string,
+  baseForRelative: string = typeof window !== "undefined" &&
+  window.location?.origin
+    ? window.location.origin
+    : "http://127.0.0.1:5000"
+): string {
+  const resolved = getApiUrl(path);
+  if (isAbsoluteHttpUrl(resolved)) {
+    return resolved;
+  }
+  return new URL(resolved, baseForRelative).toString();
 }
 
 function hasBackendAssetPrefix(path: string): boolean {

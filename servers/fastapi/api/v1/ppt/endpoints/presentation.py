@@ -1,12 +1,13 @@
 import asyncio
 from datetime import datetime
 import json
+import logging
 import os
 import random
 import traceback
 from typing import Annotated, List, Literal, Optional, Tuple
 import dirtyjson
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,6 @@ from models.presentation_outline_model import (
 )
 from enums.tone import Tone
 from enums.verbosity import Verbosity
-from models.pptx_models import PptxPresentationModel
 from models.presentation_structure_model import PresentationStructureModel
 from models.presentation_with_slides import (
     PresentationWithSlides,
@@ -46,14 +46,12 @@ from models.sql.presentation_layout_code import PresentationLayoutCodeModel
 from models.sse_response import SSECompleteResponse, SSEErrorResponse, SSEResponse
 
 from services.database import get_async_session
-from services.temp_file_service import TEMP_FILE_SERVICE
 from services.concurrent_service import CONCURRENT_SERVICE
 from models.sql.presentation import PresentationModel
-from services.pptx_presentation_creator import PptxPresentationCreator
 from models.sql.async_presentation_generation_status import (
     AsyncPresentationGenerationTaskModel,
 )
-from utils.asset_directory_utils import get_exports_directory, get_images_directory
+from utils.asset_directory_utils import get_images_directory
 from utils.llm_calls.generate_presentation_structure import (
     generate_presentation_structure,
 )
@@ -76,8 +74,15 @@ from utils.process_slides import (
 )
 from utils.get_layout_by_name import get_layout_by_name
 from utils.llm_utils import message_content_to_text
+from utils.simple_auth import (
+    SESSION_COOKIE_NAME,
+    create_session_token,
+    get_session_token_from_request,
+)
 from models.presentation_layout import PresentationLayoutModel
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 PRESENTATION_ROUTER = APIRouter(prefix="/presentation", tags=["Presentation"])
@@ -140,6 +145,28 @@ def _insert_toc_layouts(
     insertion_index = 1 if include_title_slide else 0
     for i in range(n_toc_slides):
         structure.slides.insert(insertion_index + i, toc_slide_layout_index)
+
+
+def _build_export_cookie_header(request: Request) -> Optional[str]:
+    cookie_header = (request.headers.get("cookie") or "").strip()
+    if cookie_header:
+        return cookie_header
+
+    session_token = get_session_token_from_request(request)
+    if session_token:
+        return f"{SESSION_COOKIE_NAME}={session_token}"
+
+    username = getattr(request.state, "auth_username", None)
+    if isinstance(username, str) and username.strip():
+        try:
+            session_token = create_session_token(username.strip())
+            return f"{SESSION_COOKIE_NAME}={session_token}"
+        except Exception:
+            logger.exception(
+                "[presentation.generate] failed to create export session token"
+            )
+
+    return None
 
 
 @PRESENTATION_ROUTER.get("/all", response_model=List[PresentationWithSlides])
@@ -501,56 +528,6 @@ async def update_presentation(
         slides=response_slides,
         fonts=fonts,
     )
-
-
-@PRESENTATION_ROUTER.post("/export/pptx", response_model=str)
-async def export_presentation_as_pptx(
-    pptx_model: Annotated[PptxPresentationModel, Body()],
-):
-    temp_dir = TEMP_FILE_SERVICE.create_temp_dir()
-
-    pptx_creator = PptxPresentationCreator(pptx_model, temp_dir)
-    await pptx_creator.create_ppt()
-
-    export_directory = get_exports_directory()
-    pptx_path = os.path.join(
-        export_directory, f"{pptx_model.name or uuid.uuid4()}.pptx"
-    )
-    pptx_creator.save(pptx_path)
-
-    return pptx_path
-
-
-@PRESENTATION_ROUTER.post("/export", response_model=PresentationPathAndEditPath)
-async def export_presentation_as_pptx_or_pdf(
-    id: Annotated[uuid.UUID, Body(description="Presentation ID to export")],
-    export_as: Annotated[
-        Literal["pptx", "pdf"], Body(description="Format to export the presentation as")
-    ] = "pptx",
-    sql_session: AsyncSession = Depends(get_async_session),
-):
-    """
-    Export a presentation as PPTX or PDF.
-    This Api is used to export via the nextjs app i.e using the puppeteer to export the presentation.
-    
-    """
-    presentation = await sql_session.get(PresentationModel, id)
-
-    if not presentation:
-        raise HTTPException(status_code=404, detail="Presentation not found")
-
-    presentation_and_path = await export_presentation(
-        id,
-        presentation.title or str(uuid.uuid4()),
-        export_as,
-    )
-
-    return PresentationPathAndEditPath(
-        **presentation_and_path.model_dump(),
-        edit_path=f"/presentation?id={id}",
-    )
-
-
 async def check_if_api_request_is_valid(
     request: GeneratePresentationRequest,
     sql_session: AsyncSession = Depends(get_async_session),
@@ -613,6 +590,7 @@ async def generate_presentation_handler(
     request: GeneratePresentationRequest,
     presentation_id: uuid.UUID,
     async_status: Optional[AsyncPresentationGenerationTaskModel],
+    export_cookie_header: Optional[str] = None,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
     try:
@@ -762,8 +740,18 @@ async def generate_presentation_handler(
         print("-" * 40)
         print(f"Generated {total_outlines} outlines for the presentation")
 
-        # Parse Layouts
+        logger.info(
+            "[presentation.generate] loading layout template=%r presentation_id=%s",
+            request.template,
+            presentation_id,
+        )
         layout_model = await get_layout_by_name(request.template)
+        logger.info(
+            "[presentation.generate] layout ready template=%r slides=%d ordered=%s",
+            request.template,
+            len(layout_model.slides),
+            layout_model.ordered,
+        )
         total_slide_layouts = len(layout_model.slides)
 
         # Generate Structure
@@ -930,7 +918,10 @@ async def generate_presentation_handler(
 
         # 9. Export
         presentation_and_path = await export_presentation(
-            presentation_id, presentation.title or str(uuid.uuid4()), request.export_as
+            presentation_id,
+            presentation.title or str(uuid.uuid4()),
+            request.export_as,
+            cookie_header=export_cookie_header,
         )
 
         response = PresentationPathAndEditPath(
@@ -985,13 +976,18 @@ async def generate_presentation_handler(
 
 @PRESENTATION_ROUTER.post("/generate", response_model=PresentationPathAndEditPath)
 async def generate_presentation_sync(
+    request_http: Request,
     request: GeneratePresentationRequest,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
     try:
         (presentation_id,) = await check_if_api_request_is_valid(request, sql_session)
         return await generate_presentation_handler(
-            request, presentation_id, None, sql_session
+            request,
+            presentation_id,
+            None,
+            export_cookie_header=_build_export_cookie_header(request_http),
+            sql_session=sql_session,
         )
     except HTTPException:
         raise
@@ -1004,6 +1000,7 @@ async def generate_presentation_sync(
     "/generate/async", response_model=AsyncPresentationGenerationTaskModel
 )
 async def generate_presentation_async(
+    request_http: Request,
     request: GeneratePresentationRequest,
     background_tasks: BackgroundTasks,
     sql_session: AsyncSession = Depends(get_async_session),
@@ -1024,6 +1021,7 @@ async def generate_presentation_async(
             request,
             presentation_id,
             async_status=async_status,
+            export_cookie_header=_build_export_cookie_header(request_http),
             sql_session=sql_session,
         )
         return async_status
@@ -1053,6 +1051,7 @@ async def check_async_presentation_generation_status(
 
 @PRESENTATION_ROUTER.post("/edit", response_model=PresentationPathAndEditPath)
 async def edit_presentation_with_new_content(
+    request_http: Request,
     data: Annotated[EditPresentationRequest, Body()],
     sql_session: AsyncSession = Depends(get_async_session),
 ):
@@ -1086,7 +1085,10 @@ async def edit_presentation_with_new_content(
     await sql_session.commit()
 
     presentation_and_path = await export_presentation(
-        presentation.id, presentation.title or str(uuid.uuid4()), data.export_as
+        presentation.id,
+        presentation.title or str(uuid.uuid4()),
+        data.export_as,
+        cookie_header=_build_export_cookie_header(request_http),
     )
 
     return PresentationPathAndEditPath(
@@ -1097,6 +1099,7 @@ async def edit_presentation_with_new_content(
 
 @PRESENTATION_ROUTER.post("/derive", response_model=PresentationPathAndEditPath)
 async def derive_presentation_from_existing_one(
+    request_http: Request,
     data: Annotated[EditPresentationRequest, Body()],
     sql_session: AsyncSession = Depends(get_async_session),
 ):
@@ -1126,7 +1129,10 @@ async def derive_presentation_from_existing_one(
     await sql_session.commit()
 
     presentation_and_path = await export_presentation(
-        new_presentation.id, new_presentation.title or str(uuid.uuid4()), data.export_as
+        new_presentation.id,
+        new_presentation.title or str(uuid.uuid4()),
+        data.export_as,
+        cookie_header=_build_export_cookie_header(request_http),
     )
 
     return PresentationPathAndEditPath(

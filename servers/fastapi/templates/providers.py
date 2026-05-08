@@ -24,6 +24,8 @@ from utils.get_env import (
     get_codex_account_id_env,
     get_codex_refresh_token_env,
     get_codex_token_expires_env,
+    get_custom_llm_api_key_env,
+    get_custom_llm_url_env,
     get_google_api_key_env,
     get_openai_api_key_env,
 )
@@ -49,6 +51,19 @@ class PlainLLMProvider:
     name: str
     call: Callable[[], Awaitable[str]]
 
+
+def _exception_message(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, str):
+            message = detail
+        else:
+            message = str(detail)
+    else:
+        message = str(exc) or exc.__class__.__name__
+    return " ".join(message.split())[:500]
+
+
 def get_template_provider_spec() -> TemplateProviderSpec:
     provider = get_llm_provider()
     if provider == LLMProvider.OPENAI:
@@ -59,15 +74,18 @@ def get_template_provider_spec() -> TemplateProviderSpec:
         return TemplateProviderSpec(provider=provider, model=get_model())
     if provider == LLMProvider.ANTHROPIC:
         return TemplateProviderSpec(provider=provider, model=get_model())
+    if provider == LLMProvider.CUSTOM:
+        return TemplateProviderSpec(provider=provider, model=get_model())
 
     raise HTTPException(
         status_code=400,
-        detail="Template generation only supports OpenAI, Codex, Google, or Anthropic.",
+        detail="Template generation only supports OpenAI, Codex, Google, Anthropic, or Custom (OpenAI-compatible).",
     )
 
 
 async def run_plain_provider_buckets(*, providers: list[PlainLLMProvider]) -> str:
     last_exception: Optional[Exception] = None
+    last_provider_name: Optional[str] = None
 
     for provider in providers:
         for attempt in range(1, MAX_ATTEMPTS_PER_PROVIDER + 1):
@@ -76,11 +94,24 @@ async def run_plain_provider_buckets(*, providers: list[PlainLLMProvider]) -> st
                 if response_text:
                     return response_text
                 raise ValueError("No output from template generation provider")
+            except HTTPException as exc:
+                # Configuration/auth errors should fail fast instead of retrying.
+                if 400 <= exc.status_code < 500:
+                    raise exc
+                last_exception = exc
+                last_provider_name = provider.name
             except Exception as exc:
                 last_exception = exc
+                last_provider_name = provider.name
 
     if isinstance(last_exception, HTTPException):
         raise last_exception
+    if last_exception:
+        provider_name = last_provider_name or "Template provider"
+        raise HTTPException(
+            status_code=502,
+            detail=f"{provider_name} error: {_exception_message(last_exception)}",
+        )
     raise HTTPException(status_code=500, detail="Failed to generate template output")
 
 
@@ -99,6 +130,14 @@ def _get_openai_client() -> AsyncOpenAI:
     if not api_key:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY is not set")
     return AsyncOpenAI(api_key=api_key, timeout=120.0)
+
+
+def _get_custom_client() -> AsyncOpenAI:
+    base_url = get_custom_llm_url_env()
+    if not base_url:
+        raise HTTPException(status_code=400, detail="CUSTOM_LLM_URL is not set")
+    api_key = get_custom_llm_api_key_env() or "custom"
+    return AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=120.0)
 
 
 def _get_codex_headers() -> dict:
@@ -189,6 +228,40 @@ def _read_llmai_response_text(response: Any) -> str:
                 parts.append(text)
         return "".join(parts)
     return getattr(content, "text", None) or ""
+
+
+async def _call_openai_chat(
+    *,
+    client: AsyncOpenAI,
+    model: str,
+    system_prompt: str,
+    user_text: str,
+    image_bytes: Optional[bytes] = None,
+    media_type: str = "image/png",
+) -> str:
+    content: list = [{"type": "text", "text": user_text}]
+    if image_bytes:
+        content.insert(
+            0,
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+                },
+            },
+        )
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content},
+        ],
+        max_tokens=16384,
+    )
+    output_text = (response.choices[0].message.content or "") if response.choices else ""
+    if not output_text:
+        raise HTTPException(status_code=500, detail="No output from template provider")
+    return output_text
 
 
 async def _call_openai_like(
@@ -410,10 +483,22 @@ def _build_provider_call(
                 media_type=media_type,
             ),
         )
+    if spec.provider == LLMProvider.CUSTOM:
+        return PlainLLMProvider(
+            name="Custom",
+            call=lambda: _call_openai_like(
+                client=_get_custom_client(),
+                model=spec.model,
+                system_prompt=system_prompt,
+                user_text=user_text,
+                image_bytes=image_bytes,
+                media_type=media_type,
+            ),
+        )
 
     raise HTTPException(
         status_code=400,
-        detail="Template generation only supports OpenAI, Codex, Google, or Anthropic.",
+        detail="Template generation only supports OpenAI, Codex, Google, Anthropic, or Custom (OpenAI-compatible).",
     )
 
 

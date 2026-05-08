@@ -8,6 +8,10 @@ from utils.available_models import (
     list_available_openai_compatible_models,
 )
 from utils.get_env import (
+    get_azure_openai_api_key_env,
+    get_azure_openai_api_version_env,
+    get_azure_openai_base_url_env,
+    get_azure_openai_endpoint_env,
     get_anthropic_api_key_env,
     get_anthropic_model_env,
     get_can_change_keys_env,
@@ -16,6 +20,9 @@ from utils.get_env import (
     get_openai_model_env,
     get_pixabay_api_key_env,
     get_pexels_api_key_env,
+    get_vertex_api_key_env,
+    get_vertex_location_env,
+    get_vertex_project_env,
     get_comfyui_url_env,
     get_comfyui_workflow_env,
 )
@@ -65,6 +72,34 @@ async def check_llm_and_image_provider_api_or_model_availability():
                     print("Available models: ", available_models)
                     raise Exception(f"Model {google_model} is not available")
 
+        elif get_llm_provider() == LLMProvider.VERTEX:
+            vertex_api_key = get_vertex_api_key_env()
+            vertex_project = get_vertex_project_env()
+            vertex_location = get_vertex_location_env()
+            if not vertex_api_key and not vertex_project:
+                raise Exception(
+                    "Configure VERTEX_API_KEY or VERTEX_PROJECT for Vertex AI"
+                )
+            if vertex_api_key and (vertex_project or vertex_location):
+                raise Exception(
+                    "Vertex config is ambiguous. Use either VERTEX_API_KEY or "
+                    "VERTEX_PROJECT/VERTEX_LOCATION, not both."
+                )
+
+        elif get_llm_provider() == LLMProvider.AZURE:
+            azure_api_key = get_azure_openai_api_key_env()
+            azure_endpoint = get_azure_openai_endpoint_env()
+            azure_base_url = get_azure_openai_base_url_env()
+            azure_api_version = get_azure_openai_api_version_env()
+            if not azure_api_key:
+                raise Exception("AZURE_OPENAI_API_KEY must be provided")
+            if not azure_api_version:
+                raise Exception("AZURE_OPENAI_API_VERSION must be provided")
+            if not azure_endpoint and not azure_base_url:
+                raise Exception(
+                    "AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_BASE_URL must be provided"
+                )
+
         elif get_llm_provider() == LLMProvider.ANTHROPIC:
             anthropic_api_key = get_anthropic_api_key_env()
             if not anthropic_api_key:
@@ -101,13 +136,18 @@ async def check_llm_and_image_provider_api_or_model_availability():
                 raise Exception("CUSTOM_MODEL must be provided")
             if not custom_llm_url:
                 raise Exception("CUSTOM_LLM_URL must be provided")
-            available_models = await list_available_openai_compatible_models(
-                custom_llm_url, get_custom_llm_api_key_env() or "null"
-            )
-            print("-" * 50)
-            print("Available models: ", available_models)
-            if custom_model not in available_models:
-                raise Exception(f"Model {custom_model} is not available")
+            try:
+                available_models = await list_available_openai_compatible_models(
+                    custom_llm_url, get_custom_llm_api_key_env() or "null"
+                )
+                print("-" * 50)
+                print("Available models: ", available_models)
+                if custom_model not in available_models:
+                    raise Exception(f"Model {custom_model} is not available")
+            except Exception as e:
+                if "not available" in str(e):
+                    raise
+                print(f"Warning: Could not verify custom LLM availability: {e}")
 
         # Skip image provider and API key checks if image generation is disabled
         if is_image_generation_disabled():
