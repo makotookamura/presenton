@@ -14,7 +14,7 @@ interface SupportingDocProps {
 const MAX_SUPPORTED_FILES = 8
 
 const PDF_TYPES = ['.pdf']
-const TEXT_TYPES = ['.txt']
+const TEXT_TYPES = ['.txt', '.md', '.markdown']
 const WORD_TYPES = ['.doc', '.docx', '.docm', '.odt', '.rtf']
 const POWERPOINT_TYPES = ['.ppt', '.pptx', '.pptm', '.odp']
 const SPREADSHEET_TYPES = ['.xls', '.xlsx', '.xlsm', '.ods', '.csv', '.tsv']
@@ -24,6 +24,7 @@ const ALLOWED_MIME_PREFIXES: string[] = ['image/']
 const ALLOWED_MIME_TYPES = [
     'application/pdf',
     'text/plain',
+    'text/markdown',
     'text/csv',
     'application/csv',
     'text/tab-separated-values',

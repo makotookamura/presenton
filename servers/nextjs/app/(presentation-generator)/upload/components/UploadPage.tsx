@@ -37,7 +37,7 @@ const FILE_TYPE_PRESENTATION = new Set([".ppt", ".pptx", ".pptm", ".odp"]);
 const FILE_TYPE_SPREADSHEET = new Set([".xls", ".xlsx", ".xlsm", ".ods", ".csv", ".tsv"]);
 const FILE_TYPE_IMAGE = new Set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".svg"]);
 const FILE_TYPE_PDF = new Set([".pdf"]);
-const FILE_TYPE_TEXT = new Set([".txt"]);
+const FILE_TYPE_TEXT = new Set([".txt", ".md", ".markdown"]);
 
 // Types for loading state
 interface LoadingState {
