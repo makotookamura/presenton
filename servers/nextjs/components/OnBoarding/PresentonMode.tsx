@@ -14,10 +14,12 @@ import { Switch } from '../ui/switch';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '../ui/select';
 import { MixpanelEvent, trackEvent } from '@/utils/mixpanel';
 import { usePathname } from 'next/navigation';
-import { handleSaveLLMConfig } from '@/utils/storeHelpers';
+import { getLLMConfigValidationError, handleSaveLLMConfig } from '@/utils/storeHelpers';
 import { checkIfSelectedOllamaModelIsPulled, pullOllamaModel } from '@/utils/providerUtils';
 import { getApiUrl } from '@/utils/api';
 import CodexConfig, { CHATGPT_MODELS } from '../CodexConfig';
+import VertexAzureManualFields from '@/components/VertexAzureManualFields';
+import OpenAICompatibleImageFields from '@/components/OpenAICompatibleImageFields';
 
 const MANUAL_MODEL_PROVIDERS = new Set(["vertex", "azure"]);
 
@@ -72,12 +74,18 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 return 'VERTEX_MODEL';
             case 'azure':
                 return 'AZURE_OPENAI_MODEL';
+            case 'openrouter':
+                return 'OPENROUTER_MODEL';
+            case 'cerebras':
+                return 'CEREBRAS_MODEL';
             case 'anthropic':
                 return 'ANTHROPIC_MODEL';
             case 'ollama':
                 return 'OLLAMA_MODEL';
             case 'custom':
                 return 'CUSTOM_MODEL';
+            case 'litellm':
+                return 'LITELLM_MODEL';
             default:
                 return '';
         }
@@ -92,10 +100,16 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 return 'VERTEX_API_KEY';
             case 'azure':
                 return 'AZURE_OPENAI_API_KEY';
+            case 'openrouter':
+                return 'OPENROUTER_API_KEY';
+            case 'cerebras':
+                return 'CEREBRAS_API_KEY';
             case 'anthropic':
                 return 'ANTHROPIC_API_KEY';
             case 'custom':
                 return 'CUSTOM_LLM_API_KEY';
+            case 'litellm':
+                return 'LITELLM_API_KEY';
             default:
                 return '';
         }
@@ -110,6 +124,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
 
     const currentApiKey = currentApiKeyField ? ((llmConfig as Record<string, unknown>)[currentApiKeyField] as string || '') : '';
     const currentModel = currentModelField ? ((llmConfig as Record<string, unknown>)[currentModelField] as string || '') : '';
+    const currentLitellmUrl = (llmConfig.LITELLM_BASE_URL || '').trim();
     const currentOllamaUrl = llmConfig.OLLAMA_URL || '';
     const useCustomOllamaUrl = !!llmConfig.USE_CUSTOM_URL;
     const providerApiKeyLabel =
@@ -119,7 +134,13 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 ? 'Vertex API Key'
                 : llmConfig.LLM === 'azure'
                     ? 'Azure OpenAI API Key'
-                    : `${llmConfig.LLM} API Key`;
+                    : llmConfig.LLM === 'openrouter'
+                        ? 'OpenRouter API Key'
+                        : llmConfig.LLM === 'cerebras'
+                            ? 'Cerebras API Key'
+                            : llmConfig.LLM === 'litellm'
+                                ? 'LiteLLM API key (optional)'
+                                : `${llmConfig.LLM} API Key`;
 
     const getSelectedTextModel = (config: LLMConfig): string => {
         switch (config.LLM) {
@@ -131,13 +152,20 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 return config.VERTEX_MODEL || '';
             case 'azure':
                 return config.AZURE_OPENAI_MODEL || '';
+            case 'openrouter':
+                return config.OPENROUTER_MODEL || '';
+            case 'cerebras':
+                return config.CEREBRAS_MODEL || '';
             case 'anthropic':
                 return config.ANTHROPIC_MODEL || '';
             case 'ollama':
                 return config.OLLAMA_MODEL || '';
             case 'custom':
                 return config.CUSTOM_MODEL || '';
+            case 'litellm':
+                return config.LITELLM_MODEL || '';
             case 'chatgpt':
+            case 'codex':
                 return config.CODEX_MODEL || '';
             default:
                 return '';
@@ -155,7 +183,10 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
         if (llmConfig.LLM === 'openai' && !currentApiKey) return;
         if (llmConfig.LLM === 'google' && !currentApiKey) return;
         if (llmConfig.LLM === 'anthropic' && !currentApiKey) return;
+        if (llmConfig.LLM === 'openrouter' && !currentApiKey) return;
+        if (llmConfig.LLM === 'cerebras' && !currentApiKey) return;
         if (llmConfig.LLM === 'custom' && !llmConfig.CUSTOM_LLM_URL) return;
+        if (llmConfig.LLM === 'litellm' && !currentLitellmUrl) return;
         setModelsLoading(true);
         try {
             let response: Response;
@@ -182,13 +213,19 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
             } else if (llmConfig.LLM === 'ollama') {
                 response = await fetch(getApiUrl('/api/v1/ppt/ollama/models/supported'));
             } else {
+                const openAiCompatibleUrl =
+                    llmConfig.LLM === 'custom'
+                        ? llmConfig.CUSTOM_LLM_URL
+                        : llmConfig.LLM === 'litellm'
+                            ? currentLitellmUrl
+                            : LLM_PROVIDERS[llmConfig.LLM!]?.url || '';
                 response = await fetch(getApiUrl('/api/v1/ppt/openai/models/available'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        url: llmConfig.LLM === 'custom' ? llmConfig.CUSTOM_LLM_URL : LLM_PROVIDERS[llmConfig.LLM!]?.url || '',
+                        url: openAiCompatibleUrl,
                         api_key: currentApiKey
                     }),
                 });
@@ -223,7 +260,13 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                 ? 'models/gemini-2.5-flash'
                                 : llmConfig.LLM === 'anthropic'
                                     ? 'claude-sonnet-4-20250514'
-                                    : normalizedModels[0];
+                                    : llmConfig.LLM === 'openrouter'
+                                        ? 'openai/gpt-4o'
+                                        : llmConfig.LLM === 'cerebras'
+                                            ? 'llama-3.3-70b'
+                                            : llmConfig.LLM === 'litellm'
+                                                ? 'gpt-4.1'
+                                                : normalizedModels[0];
 
                     const nextModel = normalizedModels.includes(preferredDefault) ? preferredDefault : normalizedModels[0];
                     setLlmConfig(prev => ({
@@ -341,6 +384,11 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                     return;
                 }
             }
+            const validationError = getLLMConfigValidationError(llmConfig);
+            if (validationError) {
+                toast.error("Cannot save configuration", { description: validationError });
+                return;
+            }
             setSavingConfig(true);
 
             await handleSaveLLMConfig(llmConfig);
@@ -445,8 +493,8 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                     <p className='text-xs font-normal text-[#999999]'>OR</p>
                     <div className='w-full h-[1px] bg-[#E1E1E5]' />
                 </div>
-                <div className='flex flex-col items-start gap-4 '>
-                    <div className="flex flex-col justify-start w-full ">
+                <div className="flex w-full max-w-[222px] flex-col items-start gap-4">
+                    <div className="flex w-full flex-col justify-start">
 
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             Select Text Provider
@@ -460,7 +508,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                     variant="outline"
                                     role="combobox"
                                     aria-expanded={openProviderSelect}
-                                    className=" h-12 px-4 py-4 outline-none border border-[#E8E8E9] rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors hover:border-gray-400 justify-between"
+                                    className="flex h-12 w-full px-4 py-4 outline-none border border-[#E8E8E9] rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors hover:border-gray-400 justify-between"
                                 >
                                     <div className="flex gap-3 items-center">
                                         <span className="text-sm font-medium text-gray-900">
@@ -519,7 +567,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                             </PopoverContent>
                         </Popover>
                     </div>
-                    <div className="relative flex flex-col justify-end  items-end  w-full ">
+                    <div className="relative flex w-full flex-col justify-end items-start">
                         <div className="flex flex-col justify-start w-full ">
                             {llmConfig.LLM === 'ollama' ? (
                                 <>
@@ -669,86 +717,36 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                     placeholder="OpenAI-compatible URL"
                                 />
                             )}
-                            {llmConfig.LLM === 'vertex' && (
-                                <div className="mt-2 space-y-2">
+                            {llmConfig.LLM === 'litellm' && (
+                                <>
+                                    <label className="mt-3 block text-sm font-medium text-gray-700 mb-2">
+                                        LiteLLM base URL
+                                    </label>
                                     <input
                                         type="text"
-                                        value={llmConfig.VERTEX_PROJECT || ''}
+                                        value={llmConfig.LITELLM_BASE_URL || ''}
                                         onChange={(e) => setLlmConfig(prev => ({
                                             ...prev,
-                                            VERTEX_PROJECT: e.target.value
+                                            LITELLM_BASE_URL: e.target.value
                                         }))}
                                         className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                        placeholder="GCP project (optional if API key used)"
+                                        placeholder="e.g. http://host.docker.internal:4000/v1"
                                     />
-                                    <input
-                                        type="text"
-                                        value={llmConfig.VERTEX_LOCATION || ''}
-                                        onChange={(e) => setLlmConfig(prev => ({
-                                            ...prev,
-                                            VERTEX_LOCATION: e.target.value
-                                        }))}
-                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                        placeholder="GCP location (optional)"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={llmConfig.VERTEX_BASE_URL || ''}
-                                        onChange={(e) => setLlmConfig(prev => ({
-                                            ...prev,
-                                            VERTEX_BASE_URL: e.target.value
-                                        }))}
-                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                        placeholder="Vertex base URL (optional)"
-                                    />
-                                </div>
+                                    <p className="mt-1.5 text-xs text-gray-500">
+                                        OpenAI-compatible root (usually ends with /v1); /v1 is added if omitted. API key above is optional for local proxies with no auth.
+                                    </p>
+                                </>
                             )}
-                            {llmConfig.LLM === 'azure' && (
-                                <div className="mt-2 space-y-2">
-                                    <input
-                                        type="text"
-                                        value={llmConfig.AZURE_OPENAI_ENDPOINT || ''}
-                                        onChange={(e) => setLlmConfig(prev => ({
-                                            ...prev,
-                                            AZURE_OPENAI_ENDPOINT: e.target.value
-                                        }))}
-                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                        placeholder="Azure endpoint (https://...openai.azure.com)"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={llmConfig.AZURE_OPENAI_BASE_URL || ''}
-                                        onChange={(e) => setLlmConfig(prev => ({
-                                            ...prev,
-                                            AZURE_OPENAI_BASE_URL: e.target.value
-                                        }))}
-                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                        placeholder="Azure base URL (optional alternative)"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={llmConfig.AZURE_OPENAI_API_VERSION || ''}
-                                        onChange={(e) => setLlmConfig(prev => ({
-                                            ...prev,
-                                            AZURE_OPENAI_API_VERSION: e.target.value
-                                        }))}
-                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                        placeholder="API version (e.g. 2024-10-21)"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={llmConfig.AZURE_OPENAI_DEPLOYMENT || ''}
-                                        onChange={(e) => setLlmConfig(prev => ({
-                                            ...prev,
-                                            AZURE_OPENAI_DEPLOYMENT: e.target.value
-                                        }))}
-                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                        placeholder="Deployment name (optional)"
-                                    />
-                                </div>
+                            {(llmConfig.LLM === 'vertex' || llmConfig.LLM === 'azure') && (
+                                <VertexAzureManualFields
+                                    key={llmConfig.LLM}
+                                    provider={llmConfig.LLM === 'vertex' ? 'vertex' : 'azure'}
+                                    llmConfig={llmConfig}
+                                    onPatch={(patch) => {
+                                        setLlmConfig((prev) => ({ ...prev, ...patch }));
+                                    }}
+                                />
                             )}
-
-
                         </div>
 
 
@@ -761,7 +759,10 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                     (llmConfig.LLM === 'openai' && !currentApiKey) ||
                                     (llmConfig.LLM === 'google' && !currentApiKey) ||
                                     (llmConfig.LLM === 'anthropic' && !currentApiKey) ||
-                                    (llmConfig.LLM === 'custom' && !llmConfig.CUSTOM_LLM_URL)
+                                    (llmConfig.LLM === 'openrouter' && !currentApiKey) ||
+                                    (llmConfig.LLM === 'cerebras' && !currentApiKey) ||
+                                    (llmConfig.LLM === 'custom' && !llmConfig.CUSTOM_LLM_URL) ||
+                                    (llmConfig.LLM === 'litellm' && !currentLitellmUrl)
                                 }
                                 className={`mt-4 py-2.5 bg-[#EDEEEF] disabled:opacity-50 disabled:cursor-not-allowed px-3.5 w-full  rounded-[48px] text-xs font-semibold text-[#101323] transition-all duration-200 border ${modelsLoading
                                     ? " border-gray-300 cursor-not-allowed text-gray-500"
@@ -781,7 +782,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                     </div>
 
                 </div>
-                <div className='flex items-start gap-4 mt-4'>
+                <div className="mt-4 flex w-full max-w-[222px] items-start gap-4">
 
 
                     {/* Model Selection - only show if models are available */}
@@ -865,27 +866,6 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                     </Popover>
                                 </div>
                             </div>
-                        </div>
-                    )}
-                    {isManualModelProvider && (
-                        <div className="w-full">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Enter {LLM_PROVIDERS[llmConfig.LLM!]?.label} Model
-                            </label>
-                            <input
-                                type="text"
-                                value={currentModel}
-                                onChange={(e) => {
-                                    if (currentModelField) {
-                                        setLlmConfig(prev => ({
-                                            ...prev,
-                                            [currentModelField]: e.target.value
-                                        }));
-                                    }
-                                }}
-                                className="w-full h-12 px-4 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                placeholder={llmConfig.LLM === 'vertex' ? 'e.g. gemini-2.5-flash' : 'e.g. gpt-4.1'}
-                            />
                         </div>
                     )}
                 </div>
@@ -1012,7 +992,34 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                             (() => {
                                 const provider = IMAGE_PROVIDERS[llmConfig.IMAGE_PROVIDER];
 
-
+                                if (provider.value === "openai_compatible") {
+                                    return (
+                                        <OpenAICompatibleImageFields
+                                            layout="stacked"
+                                            baseUrl={llmConfig.OPENAI_COMPAT_IMAGE_BASE_URL || ""}
+                                            apiKey={llmConfig.OPENAI_COMPAT_IMAGE_API_KEY || ""}
+                                            model={llmConfig.OPENAI_COMPAT_IMAGE_MODEL || ""}
+                                            onBaseUrlChange={(v) =>
+                                                setLlmConfig((prev) => ({
+                                                    ...prev,
+                                                    OPENAI_COMPAT_IMAGE_BASE_URL: v,
+                                                }))
+                                            }
+                                            onApiKeyChange={(v) =>
+                                                setLlmConfig((prev) => ({
+                                                    ...prev,
+                                                    OPENAI_COMPAT_IMAGE_API_KEY: v,
+                                                }))
+                                            }
+                                            onModelChange={(v) =>
+                                                setLlmConfig((prev) => ({
+                                                    ...prev,
+                                                    OPENAI_COMPAT_IMAGE_MODEL: v,
+                                                }))
+                                            }
+                                        />
+                                    );
+                                }
 
                                 // Show ComfyUI configuration
                                 if (provider.value === "comfyui") {

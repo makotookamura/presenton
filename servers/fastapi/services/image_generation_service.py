@@ -34,6 +34,7 @@ from utils.image_provider import (
     is_open_webui_selected,
     is_openai_compatible_selected,
 )
+from utils.asset_directory_utils import absolute_fastapi_asset_url
 import uuid
 
 
@@ -80,11 +81,11 @@ class ImageGenerationService:
         """
         if self.is_image_generation_disabled:
             print("Image generation is disabled. Using placeholder image.")
-            return "/static/images/placeholder.jpg"
+            return absolute_fastapi_asset_url("/static/images/placeholder.jpg")
 
         if not self.image_gen_func:
             print("No image generation function found. Using placeholder image.")
-            return "/static/images/placeholder.jpg"
+            return absolute_fastapi_asset_url("/static/images/placeholder.jpg")
 
         image_prompt = prompt.get_image_prompt(
             with_theme=not self.is_stock_provider_selected()
@@ -113,12 +114,12 @@ class ImageGenerationService:
                 elif image_path.startswith("/app_data/") or image_path.startswith(
                     "/static/"
                 ):
-                    return image_path
+                    return absolute_fastapi_asset_url(image_path)
             raise Exception(f"Image not found at {image_path}")
 
         except Exception as e:
             print(f"Error generating image: {e}")
-            return "/static/images/placeholder.jpg"
+            return absolute_fastapi_asset_url("/static/images/placeholder.jpg")
 
     async def generate_image_openai(
         self, prompt: str, output_directory: str, model: str, quality: str
@@ -681,26 +682,44 @@ class ImageGenerationService:
                 "OPENAI_COMPAT_IMAGE_BASE_URL, OPENAI_COMPAT_IMAGE_API_KEY and OPENAI_COMPAT_IMAGE_MODEL must be set."
             )
 
+        from urllib.parse import urlparse
+
+        parsed = urlparse(base_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+
         client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
-        try:
-            response = await client.images.generate(
-                model=model,
-                prompt=prompt,
-                n=1,
-                size="1024x1024",
-                response_format="b64_json",
-            )
+        response = await client.images.generate(
+            model=model,
+            prompt=prompt,
+            n=1,
+            size="1024x1024",
+        )
 
-            image_data = base64.b64decode(response.data[0].b64_json)
-            image_path = os.path.join(output_directory, f"{uuid.uuid4()}.png")
+        item = response.data[0]
+        image_path = os.path.join(output_directory, f"{uuid.uuid4()}.png")
 
+        if item.b64_json:
             with open(image_path, "wb") as f:
-                f.write(image_data)
+                f.write(base64.b64decode(item.b64_json))
+        elif item.url:
+            image_url = item.url
+            if image_url.startswith("/"):
+                image_url = origin + image_url
+            headers = {"Authorization": f"Bearer {api_key}"}
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                dl_resp = await session.get(
+                    image_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=120),
+                )
+                if dl_resp.status != 200:
+                    raise Exception(
+                        f"Failed to download image from OpenAI-compatible provider: {dl_resp.status}"
+                    )
+                with open(image_path, "wb") as f:
+                    f.write(await dl_resp.read())
+        else:
+            raise Exception("OpenAI-compatible provider returned no image data")
 
-            return image_path
-        except Exception as e:
-            print(f"Error generating image with OpenAI Compatible provider: {e}")
-            raise e
-
-        raise Exception("No images found in ComfyUI outputs")
+        return image_path

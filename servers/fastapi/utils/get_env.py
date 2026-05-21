@@ -19,6 +19,17 @@ def get_app_data_directory_env():
     return os.getenv("APP_DATA_DIRECTORY")
 
 
+def get_fastapi_public_base_url() -> str | None:
+    """
+    Public origin where FastAPI serves /app_data and /static (no trailing slash).
+
+    Uses NEXT_PUBLIC_FAST_API (same value Electron and the export runtime inject for the UI).
+    When unset, callers keep path-only URLs for same-origin / reverse-proxy setups (e.g. Docker).
+    """
+    v = (os.getenv("NEXT_PUBLIC_FAST_API") or "").strip().rstrip("/")
+    return v or None
+
+
 def get_temp_directory_env():
     return os.getenv("TEMP_DIRECTORY")
 
@@ -61,18 +72,6 @@ def get_openai_api_key_env():
 
 def get_openai_model_env():
     return os.getenv("OPENAI_MODEL")
-
-
-def get_openai_compat_image_base_url_env():
-    return os.getenv("OPENAI_COMPAT_IMAGE_BASE_URL")
-
-
-def get_openai_compat_image_api_key_env():
-    return os.getenv("OPENAI_COMPAT_IMAGE_API_KEY")
-
-
-def get_openai_compat_image_model_env():
-    return os.getenv("OPENAI_COMPAT_IMAGE_MODEL")
 
 
 def get_google_api_key_env():
@@ -125,6 +124,42 @@ def get_azure_openai_api_version_env():
 
 def get_azure_openai_deployment_env():
     return os.getenv("AZURE_OPENAI_DEPLOYMENT")
+
+
+def get_openrouter_api_key_env():
+    return os.getenv("OPENROUTER_API_KEY")
+
+
+def get_openrouter_model_env():
+    return os.getenv("OPENROUTER_MODEL")
+
+
+def get_openrouter_base_url_env():
+    return os.getenv("OPENROUTER_BASE_URL")
+
+
+def get_cerebras_api_key_env():
+    return os.getenv("CEREBRAS_API_KEY")
+
+
+def get_cerebras_model_env():
+    return os.getenv("CEREBRAS_MODEL")
+
+
+def get_cerebras_base_url_env():
+    return os.getenv("CEREBRAS_BASE_URL")
+
+
+def get_litellm_base_url_env():
+    return os.getenv("LITELLM_BASE_URL")
+
+
+def get_litellm_api_key_env():
+    return os.getenv("LITELLM_API_KEY")
+
+
+def get_litellm_model_env():
+    return os.getenv("LITELLM_MODEL")
 
 
 def get_custom_llm_api_key_env():
@@ -232,6 +267,8 @@ def get_sentry_traces_sample_rate_env():
 
 def get_sentry_send_default_pii_env():
     return os.getenv("SENTRY_SEND_DEFAULT_PII")
+
+
 # Open WebUI Image Provider
 def get_open_webui_image_url_env():
     return os.getenv("OPEN_WEBUI_IMAGE_URL")
@@ -239,3 +276,16 @@ def get_open_webui_image_url_env():
 
 def get_open_webui_image_api_key_env():
     return os.getenv("OPEN_WEBUI_IMAGE_API_KEY")
+
+
+# OpenAI Compatible Image Provider
+def get_openai_compat_image_base_url_env():
+    return os.getenv("OPENAI_COMPAT_IMAGE_BASE_URL")
+
+
+def get_openai_compat_image_api_key_env():
+    return os.getenv("OPENAI_COMPAT_IMAGE_API_KEY")
+
+
+def get_openai_compat_image_model_env():
+    return os.getenv("OPENAI_COMPAT_IMAGE_MODEL")

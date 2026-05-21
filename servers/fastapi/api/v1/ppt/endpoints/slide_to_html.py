@@ -1,72 +1,27 @@
-import os
-import base64
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from openai import OpenAI
-from openai import APIError
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, func
-from utils.asset_directory_utils import get_images_directory, resolve_image_path_to_filesystem
-from services.database import get_async_session
+
 from models.sql.presentation_layout_code import PresentationLayoutCodeModel
-from .prompts import (
-    GENERATE_HTML_SYSTEM_PROMPT,
-    HTML_TO_REACT_SYSTEM_PROMPT,
-    HTML_EDIT_SYSTEM_PROMPT,
-)
 from models.sql.template import TemplateModel
+from services.database import get_async_session
 
-
-# Create separate routers for each functionality
-SLIDE_TO_HTML_ROUTER = APIRouter(prefix="/slide-to-html", tags=["slide-to-html"])
-HTML_TO_REACT_ROUTER = APIRouter(prefix="/html-to-react", tags=["html-to-react"])
-HTML_EDIT_ROUTER = APIRouter(prefix="/html-edit", tags=["html-edit"])
 LAYOUT_MANAGEMENT_ROUTER = APIRouter(
     prefix="/template-management", tags=["template-management"]
 )
 
 
-# Request/Response models for slide-to-html endpoint
-class SlideToHtmlRequest(BaseModel):
-    image: str  # Partial path to image file (e.g., "/app_data/images/uuid/slide_1.png")
-    xml: str  # OXML content as text
-    fonts: Optional[List[str]] = None  # Optional normalized root fonts for this slide
-
-
-class SlideToHtmlResponse(BaseModel):
-    success: bool
-    html: str
-
-
-# Request/Response models for html-edit endpoint
-class HtmlEditResponse(BaseModel):
-    success: bool
-    edited_html: str
-    message: Optional[str] = None
-
-
-# Request/Response models for html-to-react endpoint
-class HtmlToReactRequest(BaseModel):
-    html: str  # HTML content to convert to React component
-    image: Optional[str] = None  # Optional image path to provide visual context
-
-
-class HtmlToReactResponse(BaseModel):
-    success: bool
-    react_component: str
-    message: Optional[str] = None
-
-
-# Request/Response models for layout management endpoints
 class LayoutData(BaseModel):
-    presentation: UUID  # UUID of the presentation
-    layout_id: str  # Unique identifier for the layout
-    layout_name: str  # Display name of the layout
-    layout_code: str  # TSX/React component code for the layout
-    fonts: Optional[List[str]] = None  # Optional list of font links
+    presentation: UUID
+    layout_id: str
+    layout_name: str
+    layout_code: str
+    fonts: Optional[List[str]] = None
 
 
 class SaveLayoutsRequest(BaseModel):
@@ -719,11 +674,10 @@ async def save_layouts(
         HTTPException: 400 for validation errors, 500 for server errors
     """
     try:
-        # Validate request data
         if not request.layouts:
             raise HTTPException(status_code=400, detail="Layouts array cannot be empty")
 
-        if len(request.layouts) > 50:  # Reasonable limit
+        if len(request.layouts) > 50:
             raise HTTPException(
                 status_code=400, detail="Cannot save more than 50 layouts at once"
             )
@@ -731,7 +685,6 @@ async def save_layouts(
         saved_count = 0
 
         for i, layout_data in enumerate(request.layouts):
-            # Validate individual layout data
             if (
                 not layout_data.presentation
                 or not str(layout_data.presentation).strip()
@@ -756,7 +709,6 @@ async def save_layouts(
                     status_code=400, detail=f"Layout {i+1}: layout_code cannot be empty"
                 )
 
-            # Check if layout already exists for this presentation and layout_id
             stmt = select(PresentationLayoutCodeModel).where(
                 PresentationLayoutCodeModel.presentation == layout_data.presentation,
                 PresentationLayoutCodeModel.layout_id == layout_data.layout_id,
@@ -765,13 +717,11 @@ async def save_layouts(
             existing_layout = result.scalar_one_or_none()
 
             if existing_layout:
-                # Update existing layout
                 existing_layout.layout_name = layout_data.layout_name
                 existing_layout.layout_code = layout_data.layout_code
                 existing_layout.fonts = layout_data.fonts
                 existing_layout.updated_at = datetime.now()
             else:
-                # Create new layout
                 new_layout = PresentationLayoutCodeModel(
                     presentation=layout_data.presentation,
                     layout_id=layout_data.layout_id,
@@ -792,7 +742,6 @@ async def save_layouts(
         )
 
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         await session.rollback()
         raise
     except Exception as e:
@@ -804,7 +753,6 @@ async def save_layouts(
         )
 
 
-# ENDPOINT 5: Get layouts for a presentation
 @LAYOUT_MANAGEMENT_ROUTER.get(
     "/get-templates/{presentation}",
     response_model=GetLayoutsResponse,
@@ -822,39 +770,25 @@ async def get_layouts(
 ):
     """
     Retrieve all layouts for a specific presentation.
-
-    Args:
-        presentation: UUID of the presentation
-        session: Database session
-
-    Returns:
-        GetLayoutsResponse with layouts data
-
-    Raises:
-        HTTPException: 404 if no layouts found, 400 for invalid UUID, 500 for server errors
     """
     try:
-        # Validate presentation_id format (basic UUID check)
         if not presentation or len(str(presentation).strip()) == 0:
             raise HTTPException(
                 status_code=400, detail="Presentation ID cannot be empty"
             )
 
-        # Query layouts for the given presentation_id
         stmt = select(PresentationLayoutCodeModel).where(
             PresentationLayoutCodeModel.presentation == presentation
         )
         result = await session.execute(stmt)
         layouts_db = result.scalars().all()
 
-        # Check if any layouts were found
         if not layouts_db:
             raise HTTPException(
                 status_code=404,
                 detail=f"No layouts found for presentation ID: {presentation}",
             )
 
-        # Convert to response format
         layouts = [
             LayoutData(
                 presentation=layout.presentation,
@@ -866,14 +800,12 @@ async def get_layouts(
             for layout in layouts_db
         ]
 
-        # Aggregate unique fonts across all layouts
         aggregated_fonts: set[str] = set()
         for layout in layouts_db:
             if layout.fonts:
                 aggregated_fonts.update([f for f in layout.fonts if isinstance(f, str)])
         fonts_list = sorted(list(aggregated_fonts)) if aggregated_fonts else None
 
-        # Fetch template meta
         template_meta = await session.get(TemplateModel, presentation)
         template = None
         if template_meta:
@@ -893,7 +825,6 @@ async def get_layouts(
         )
 
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
         print(f"Error retrieving layouts for presentation {presentation}: {str(e)}")
@@ -903,7 +834,6 @@ async def get_layouts(
         )
 
 
-# ENDPOINT: Get all presentations with layout counts
 @LAYOUT_MANAGEMENT_ROUTER.get(
     "/summary",
     response_model=GetPresentationSummaryResponse,
@@ -920,11 +850,8 @@ async def get_layouts(
 async def get_presentations_summary(
     session: AsyncSession = Depends(get_async_session),
 ):
-    """
-    Get summary of all presentations with their layout counts.
-    """
+    """Get summary of all presentations with their layout counts."""
     try:
-        # Query to get presentation_id, count of layouts, and MAX(updated_at)
         stmt = select(
             PresentationLayoutCodeModel.presentation,
             func.count(PresentationLayoutCodeModel.id).label("layout_count"),
@@ -934,7 +861,6 @@ async def get_presentations_summary(
         result = await session.execute(stmt)
         presentation_data = result.all()
 
-        # Convert to response format with template info if available
         presentations = []
         for row in presentation_data:
             template_meta = await session.get(TemplateModel, row.presentation)
@@ -955,7 +881,6 @@ async def get_presentations_summary(
                 )
             )
 
-        # Calculate totals
         total_presentations = len(presentations)
         total_layouts = sum(p.layout_count for p in presentations)
 
@@ -991,7 +916,6 @@ async def create_template(
         if not request.id or not request.name:
             raise HTTPException(status_code=400, detail="id and name are required")
 
-        # Upsert template by id
         existing = await session.get(TemplateModel, request.id)
         if existing:
             existing.name = request.name
@@ -1004,7 +928,6 @@ async def create_template(
             )
         await session.commit()
 
-        # Read back
         template = await session.get(TemplateModel, request.id)
         return TemplateCreateResponse(
             success=True,
@@ -1041,5 +964,5 @@ async def delete_template(
             )
         )
         await session.commit()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete template")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete template")

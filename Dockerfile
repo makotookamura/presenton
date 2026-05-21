@@ -23,8 +23,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /opt/venv/bin/python \
     "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-RUN --mount=type=cache,target=/root/.cache \
-    /opt/venv/bin/python scripts/warm_fastembed_cache.py
+ENV HF_HOME=/root/.cache/huggingface \
+    PRESENTON_FASTEMBED_ICON_CACHE_DIR=/root/.cache/presenton/fastembed-icons
+# Warm FastEmbed caches into the image (not a BuildKit cache mount, or HF weights would be missing).
+RUN /opt/venv/bin/python scripts/warm_fastembed_cache.py
 
 
 FROM node:20-bookworm-slim AS nextjs-builder
@@ -59,7 +61,8 @@ RUN mkdir -p /app/document-extraction-liteparse \
 COPY electron/resources/document-extraction/liteparse_runner.mjs /app/document-extraction-liteparse/liteparse_runner.mjs
 COPY scripts/sync-presentation-export.cjs /app/scripts/sync-presentation-export.cjs
 # Bundled export still loads @img/sharp-* native addons from node_modules (not inlined).
-RUN node /app/scripts/sync-presentation-export.cjs --force \
+RUN rm -rf /app/presentation-export \
+    && node /app/scripts/sync-presentation-export.cjs --force \
     && chmod +x /app/presentation-export/py/convert-linux-x64 \
     && cd /app/presentation-export \
     && npm init -y \
@@ -76,17 +79,24 @@ ARG INSTALL_LIBREOFFICE=true
 # LiteParse uses Node + @llamaindex/liteparse (same runner as Electron); OCR uses Tesseract.
 ENV APP_DATA_DIRECTORY=/app_data \
     TEMP_DIRECTORY=/tmp/presenton \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     EXPORT_PACKAGE_ROOT=/app/presentation-export \
     EXPORT_RUNTIME_DIR=/app/presentation-export \
     BUILT_PYTHON_MODULE_PATH=/app/presentation-export/py/convert-linux-x64 \
     PRESENTON_APP_ROOT=/app \
+    HF_HOME=/root/.cache/huggingface \
+    PRESENTON_FASTEMBED_ICON_CACHE_DIR=/root/.cache/presenton/fastembed-icons \
     PATH="/opt/venv/bin:${PATH}" \
     NODE_ENV=production \
     START_OLLAMA=false
 
 RUN set -eux; \
-    packages="ca-certificates curl nginx fontconfig chromium imagemagick zstd"; \
+    packages="ca-certificates curl nginx fontconfig imagemagick zstd \
+      fonts-liberation xdg-utils \
+      libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+      libcairo2 libcups2t64 libdbus-1-3 libdrm2 libexpat1 libgbm1 \
+      libglib2.0-0t64 libgtk-3-0t64 libnspr4 libnss3 libpango-1.0-0 \
+      libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+      libxkbcommon0 libxrandr2 libxshmfence1 libxss1 libxtst6"; \
     if [ "$INSTALL_LIBREOFFICE" = "true" ]; then packages="$packages libreoffice"; fi; \
     if [ "$INSTALL_TESSERACT" = "true" ]; then packages="$packages tesseract-ocr tesseract-ocr-eng"; fi; \
     apt-get update; \
@@ -96,9 +106,13 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /app/scripts /app/servers/fastapi /app/servers/nextjs
+RUN mkdir -p /app_data/exports /app_data/images /app_data/uploads /app_data/fonts /app_data/pptx-to-html \
+    && chmod -R a+rX /app_data
 
 COPY --from=fastapi-builder /opt/venv /opt/venv
 COPY --from=fastapi-builder /app/servers/fastapi /app/servers/fastapi
+COPY --from=fastapi-builder /root/.cache/huggingface /root/.cache/huggingface
+COPY --from=fastapi-builder /root/.cache/presenton/fastembed-icons /root/.cache/presenton/fastembed-icons
 
 COPY --from=assets-builder /app/package.json /app/package.json
 COPY --from=assets-builder /app/document-extraction-liteparse /app/document-extraction-liteparse

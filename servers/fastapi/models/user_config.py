@@ -28,6 +28,21 @@ class UserConfig(BaseModel):
     AZURE_OPENAI_API_VERSION: Optional[str] = None
     AZURE_OPENAI_DEPLOYMENT: Optional[str] = None
 
+    # OpenRouter
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_MODEL: Optional[str] = None
+    OPENROUTER_BASE_URL: Optional[str] = None
+
+    # Cerebras
+    CEREBRAS_API_KEY: Optional[str] = None
+    CEREBRAS_MODEL: Optional[str] = None
+    CEREBRAS_BASE_URL: Optional[str] = None
+
+    # LiteLLM (OpenAI-compatible gateway / proxy)
+    LITELLM_BASE_URL: Optional[str] = None
+    LITELLM_API_KEY: Optional[str] = None
+    LITELLM_MODEL: Optional[str] = None
+
     # Anthropic
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: Optional[str] = None
@@ -40,11 +55,6 @@ class UserConfig(BaseModel):
     CUSTOM_LLM_URL: Optional[str] = None
     CUSTOM_LLM_API_KEY: Optional[str] = None
     CUSTOM_MODEL: Optional[str] = None
-
-    # OpenAI Compatible Image Provider
-    OPENAI_COMPAT_IMAGE_BASE_URL: Optional[str] = None
-    OPENAI_COMPAT_IMAGE_API_KEY: Optional[str] = None
-    OPENAI_COMPAT_IMAGE_MODEL: Optional[str] = None
 
     # Image Provider
     DISABLE_IMAGE_GENERATION: Optional[bool] = None
@@ -59,6 +69,11 @@ class UserConfig(BaseModel):
     # Open WebUI Image Provider
     OPEN_WEBUI_IMAGE_URL: Optional[str] = None
     OPEN_WEBUI_IMAGE_API_KEY: Optional[str] = None
+
+    # OpenAI Compatible Image Provider
+    OPENAI_COMPAT_IMAGE_BASE_URL: Optional[str] = None
+    OPENAI_COMPAT_IMAGE_API_KEY: Optional[str] = None
+    OPENAI_COMPAT_IMAGE_MODEL: Optional[str] = None
 
     # Dalle 3 Quality
     DALL_E_3_QUALITY: Optional[str] = None

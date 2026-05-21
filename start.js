@@ -3,8 +3,24 @@
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { randomUUID } from "crypto";
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
 import { printPresentonStartupBanner } from "./scripts/presenton-terminal-banner.mjs";
+
+process.umask(0o022);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,13 +41,111 @@ const appmcpPort = 8001;
 /** Must match `listen` in nginx.conf (public HTTP inside the container). */
 const nginxListenPort = 80;
 
-const userConfigPath = join(process.env.APP_DATA_DIRECTORY, "userConfig.json");
-const userDataDir = dirname(userConfigPath);
-
-// Create user_data directory if it doesn't exist
-if (!existsSync(userDataDir)) {
-  mkdirSync(userDataDir, { recursive: true });
+const appDataDirectory = process.env.APP_DATA_DIRECTORY;
+if (!appDataDirectory) {
+  throw new Error("APP_DATA_DIRECTORY is required");
 }
+
+const appDataDirectoryMode = 0o755;
+const userConfigPath = join(appDataDirectory, "userConfig.json");
+const userConfigBackupPath = `${userConfigPath}.bak`;
+const userDataDir = dirname(userConfigPath);
+const appDataStaticDirectories = [
+  "exports",
+  "images",
+  "uploads",
+  "fonts",
+  "pptx-to-html",
+].map((name) => join(appDataDirectory, name));
+
+const ensureReadableDirectory = (dirPath) => {
+  mkdirSync(dirPath, { recursive: true, mode: appDataDirectoryMode });
+  chmodSync(dirPath, appDataDirectoryMode);
+};
+
+const ensureReadableExportFiles = (dirPath) => {
+  for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+    const entryPath = join(dirPath, entry.name);
+
+    if (entry.isDirectory()) {
+      chmodSync(entryPath, appDataDirectoryMode);
+      ensureReadableExportFiles(entryPath);
+    } else if (entry.isFile()) {
+      chmodSync(entryPath, 0o644);
+    }
+  }
+};
+
+const ensureAppDataDirectories = () => {
+  ensureReadableDirectory(userDataDir);
+  for (const dirPath of appDataStaticDirectories) {
+    ensureReadableDirectory(dirPath);
+  }
+  ensureReadableExportFiles(join(appDataDirectory, "exports"));
+};
+
+ensureAppDataDirectories();
+
+const readJsonConfig = (filePath) => {
+  try {
+    if (!existsSync(filePath)) {
+      return undefined;
+    }
+    const raw = readFileSync(filePath, "utf8").trim();
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const readUserConfig = () =>
+  readJsonConfig(userConfigPath) || readJsonConfig(userConfigBackupPath) || {};
+
+const copyUserConfigBackup = () => {
+  try {
+    if (readJsonConfig(userConfigPath)) {
+      copyFileSync(userConfigPath, userConfigBackupPath);
+      chmodSync(userConfigBackupPath, 0o644);
+    }
+  } catch (error) {
+    console.warn("Failed to update user config backup:", error);
+  }
+};
+
+const writeUserConfig = (config) => {
+  ensureReadableDirectory(userDataDir);
+  copyUserConfigBackup();
+
+  const tempPath = `${userConfigPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  const fd = openSync(tempPath, "w");
+  try {
+    writeFileSync(fd, JSON.stringify(config), "utf8");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+
+  try {
+    renameSync(tempPath, userConfigPath);
+    chmodSync(userConfigPath, 0o644);
+    if (!existsSync(userConfigBackupPath)) {
+      copyUserConfigBackup();
+    }
+  } catch (error) {
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // Best-effort cleanup.
+    }
+    throw error;
+  }
+};
 
 // Setup node_modules for development
 const setupNodeModules = () => {
@@ -196,13 +310,9 @@ if (!process.env.FAST_API_INTERNAL_URL) {
 
 //? UserConfig is only setup if API Keys can be changed
 const setupUserConfigFromEnv = () => {
-  let existingConfig = {};
+  let existingConfig = readUserConfig();
 
-  if (existsSync(userConfigPath)) {
-    existingConfig = JSON.parse(readFileSync(userConfigPath, "utf8"));
-  }
-
-  if (!["ollama", "openai", "google", "vertex", "azure", "anthropic", "custom", "codex"].includes(existingConfig.LLM)) {
+  if (!["ollama", "openai", "google", "vertex", "azure", "openrouter", "cerebras", "anthropic", "litellm", "custom", "codex"].includes(existingConfig.LLM)) {
     existingConfig.LLM = undefined;
   }
 
@@ -239,6 +349,9 @@ const setupUserConfigFromEnv = () => {
     CUSTOM_LLM_API_KEY:
       process.env.CUSTOM_LLM_API_KEY || existingConfig.CUSTOM_LLM_API_KEY,
     CUSTOM_MODEL: process.env.CUSTOM_MODEL || existingConfig.CUSTOM_MODEL,
+    LITELLM_BASE_URL: process.env.LITELLM_BASE_URL || existingConfig.LITELLM_BASE_URL,
+    LITELLM_API_KEY: process.env.LITELLM_API_KEY || existingConfig.LITELLM_API_KEY,
+    LITELLM_MODEL: process.env.LITELLM_MODEL || existingConfig.LITELLM_MODEL,
     PEXELS_API_KEY: process.env.PEXELS_API_KEY || existingConfig.PEXELS_API_KEY,
     PIXABAY_API_KEY:
       process.env.PIXABAY_API_KEY || existingConfig.PIXABAY_API_KEY,
@@ -266,7 +379,7 @@ const setupUserConfigFromEnv = () => {
     AUTH_SECRET_KEY: existingConfig.AUTH_SECRET_KEY,
   };
 
-  writeFileSync(userConfigPath, JSON.stringify(userConfig));
+  writeUserConfig(userConfig);
 };
 
 const startServers = async (nginxReadyPromise) => {
