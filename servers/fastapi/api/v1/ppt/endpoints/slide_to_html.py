@@ -1,16 +1,29 @@
+import os
+import base64
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional, List, Dict
 from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Depends
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from openai import OpenAI
+from openai import APIError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from models.sql.presentation_layout_code import PresentationLayoutCodeModel
-from models.sql.template import TemplateModel
+from sqlalchemy import select, delete, func
+from utils.asset_directory_utils import get_images_directory, resolve_image_path_to_filesystem
 from services.database import get_async_session
+from models.sql.presentation_layout_code import PresentationLayoutCodeModel
+from .prompts import (
+    GENERATE_HTML_SYSTEM_PROMPT,
+    HTML_TO_REACT_SYSTEM_PROMPT,
+    HTML_EDIT_SYSTEM_PROMPT,
+)
+from models.sql.template import TemplateModel
 
+
+# Create separate routers for each functionality
+SLIDE_TO_HTML_ROUTER = APIRouter(prefix="/slide-to-html", tags=["slide-to-html"])
+HTML_TO_REACT_ROUTER = APIRouter(prefix="/html-to-react", tags=["html-to-react"])
+HTML_EDIT_ROUTER = APIRouter(prefix="/html-edit", tags=["html-edit"])
 LAYOUT_MANAGEMENT_ROUTER = APIRouter(
     prefix="/template-management", tags=["template-management"]
 )
