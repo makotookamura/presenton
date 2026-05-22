@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 export const slideLayoutId = "panel-list-with-media";
 export const slideLayoutName = "Panel List with Media";
@@ -237,9 +238,8 @@ const PanelListWithMedia = ({ data }: { data: Partial<SchemaType> }) => {
                           <p
                             className="mt-[6px] text-[22px] leading-[1.08]"
                             style={{ color: "var(--background-text,#cbc7b2)" }}
-                          >
-                            {item.description ?? "Ut enim ad minima veniam."}
-                          </p>
+                            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(item.description ?? "Ut enim ad minima veniam.") }}
+                          />
                         )}
                       </div>
                     ))}

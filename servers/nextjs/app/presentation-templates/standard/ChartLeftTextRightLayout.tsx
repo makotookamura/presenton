@@ -82,8 +82,10 @@ const chartTextColor = (element: HTMLElement) =>
 const chartLabelColor = (element: HTMLElement) =>
   resolveCssValue(element, "var(--background-text, #111827)", "#111827")
 
-const chartFont = (element: HTMLElement) =>
-  resolveCssValue(element, "var(--heading-font-family,Playfair Display)", "Playfair Display").replace(/^['"]|['"]$/g, "")
+const chartFont = (element: HTMLElement) => {
+  const base = resolveCssValue(element, "var(--heading-font-family,Playfair Display)", "Playfair Display").replace(/^['"]|['"]$/g, "");
+  return `${base}, "Noto Sans JP", sans-serif`;
+}
 
 const chartColor = (element: HTMLElement, index: number) => {
   const slot = index % 10

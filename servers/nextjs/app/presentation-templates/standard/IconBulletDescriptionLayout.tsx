@@ -2,6 +2,7 @@ import { RemoteSvgIcon } from '@/app/hooks/useRemoteSvgIcon';
 import React from 'react'
 // charts removed
 import * as z from "zod";
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 
 const ImageSchema = z.object({
@@ -142,7 +143,7 @@ const dynamicSlideLayout: React.FC<SlideLayoutProps> = ({ data: slideData }) => 
                     </div>
                     <div className="flex-1">
                       <h3 className=" text-[24px] font-semibold leading-[1.15]" style={{ color: 'var(--background-text, #111827)' }}>{item.title}</h3>
-                      <p className=" text-[16px] leading-[1.55] mt-[8px]" style={{ color: 'var(--background-text, #6B7280)' }}>{item.description}</p>
+                      <p className=" text-[16px] leading-[1.55] mt-[8px]" style={{ color: 'var(--background-text, #6B7280)' }} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(item.description || "") }} />
                     </div>
                   </li>
                 ))}
@@ -151,11 +152,9 @@ const dynamicSlideLayout: React.FC<SlideLayoutProps> = ({ data: slideData }) => 
           </div>
 
           <div className="pt-[28px]">
-            <h1 className="font-['Playfair Display'] text-[64px] leading-[1.05] tracking-[-0.01em] max-w-[600px] font-semibold" style={{ color: 'var(--background-text, #111827)' }} dangerouslySetInnerHTML={{ __html: (slideData?.rightTitle || "Disrupting the\nIndustry").replace(/\n/g, "<br/>") }}></h1>
+            <h1 className="font-inherit text-[64px] leading-[1.05] tracking-[-0.01em] max-w-[600px] font-semibold" style={{ color: 'var(--background-text, #111827)' }} dangerouslySetInnerHTML={{ __html: (slideData?.rightTitle || "Disrupting the\nIndustry").replace(/\n/g, "<br/>") }}></h1>
             <div className="mt-[24px] inline-block rounded-md px-6 py-4" style={{ backgroundColor: 'var(--card-color, #F3F4F6)' }}>
-              <p className="font-['Playfair Display'] text-[16px] leading-[1.6] max-w-[620px]" style={{ color: 'var(--background-text, #6B7280)' }}>
-                {slideData?.rightDescription || "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna"}
-              </p>
+              <p className="font-inherit text-[16px] leading-[1.6] max-w-[620px]" style={{ color: 'var(--background-text, #6B7280)' }} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(slideData?.rightDescription || "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna") }} />
             </div>
 
 

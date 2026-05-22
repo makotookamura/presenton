@@ -1,6 +1,7 @@
 import React from 'react'
 // charts removed
 import * as z from "zod";
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 const ImageSchema = z.object({
   __image_url__: z.string().url().default("https://images.unsplash.com/photo-1503264116251-35a269479413?q=80&w=1200&auto=format&fit=crop").meta({
@@ -161,9 +162,7 @@ const dynamicSlideLayout: React.FC<SlideLayoutProps> = ({ data: slideData }) => 
                     <h3 className="text-white  text-[24px]" style={{ color: 'var(--primary-text, #FFFFFF)' }}>
                       {card.subtitle}
                     </h3>
-                    <p className="mt-1 text-white/95  text-[16px] leading-[1.55]" style={{ color: 'var(--primary-text, #FFFFFF)' }}  >
-                      {card.body}
-                    </p>
+                    <p className="mt-1 text-white/95  text-[16px] leading-[1.55]" style={{ color: 'var(--primary-text, #FFFFFF)' }} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(card.body || "") }} />
                   </div>
                 </div>
               </div>

@@ -38,8 +38,10 @@ const chartTextColor = (element: HTMLElement, fallback = "#7f8491") =>
 const chartLabelColor = (element: HTMLElement) =>
   resolveCssValue(element, "var(--background-text, #111827)", "#111827");
 
-const chartFont = (element: HTMLElement) =>
-  resolveCssValue(element, "var(--heading-font-family,Montserrat)", "Montserrat").replace(/^['"]|['"]$/g, "");
+const chartFont = (element: HTMLElement) => {
+  const base = resolveCssValue(element, "var(--heading-font-family,Montserrat)", "Montserrat").replace(/^['"]|['"]$/g, "");
+  return `${base}, "Noto Sans JP", sans-serif`;
+};
 
 const graphColor = (element: HTMLElement, index: number, fallback = DEFAULT_COLORS[index % DEFAULT_COLORS.length]) => {
   const slot = index % 10;

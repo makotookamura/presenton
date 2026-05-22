@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 export const slideLayoutId = "media-and-text-split";
 export const slideLayoutName = "Media and Text Split";
@@ -127,9 +128,8 @@ const MediaAndTextSplit = ({ data }: { data: Partial<SchemaType> }) => {
               <p
                 className="mt-[34px] max-w-[610px] text-[22px] leading-[1.16]"
                 style={{ color: "var(--background-text,#cbc7b2)" }}
-              >
-                {slideData.body}
-              </p>
+                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(slideData.body || "") }}
+              />
             </div>
             <p
               className="mt-[100px] text-[34px] leading-none"

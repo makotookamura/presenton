@@ -180,10 +180,11 @@ function resolveColor(element: HTMLElement, value: string) {
 }
 
 function resolveFont(element: HTMLElement) {
-  return resolveToken(element, BODY_FONT, "Times New Roman").replace(
+  const base = resolveToken(element, BODY_FONT, "Times New Roman").replace(
     /^['"]|['"]$/g,
     ""
   );
+  return `${base}, "Noto Sans JP", sans-serif`;
 }
 
 function withAlpha(color: string, alpha: number) {

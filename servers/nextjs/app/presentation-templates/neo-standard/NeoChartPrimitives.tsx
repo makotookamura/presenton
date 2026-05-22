@@ -40,7 +40,8 @@ function resolveToken(element: HTMLElement, value: unknown, fallback: string) {
 }
 
 function resolveFont(element: HTMLElement) {
-    return resolveToken(element, FONT_FAMILY, "Poppins").replace(/^['"]|['"]$/g, "");
+    const base = resolveToken(element, FONT_FAMILY, "Poppins").replace(/^['"]|['"]$/g, "");
+    return `${base}, "Noto Sans JP", sans-serif`;
 }
 
 function resolveColor(element: HTMLElement, value: unknown, fallback = "#7f8491") {

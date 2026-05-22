@@ -1,5 +1,5 @@
 import * as z from "zod";
-
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 export const slideLayoutId = "title-description-with-image-block-slide";
 export const slideLayoutName = "Title Description with Image Block Slide";
@@ -140,9 +140,8 @@ const OurServicesSlide = ({ data }: { data: Partial<SchemaType> }) => {
                     ? "var(--primary-text,#edf2f1)"
                     : "var(--background-text,#15342DCC)",
                 }}
-              >
-                {card.body}
-              </p>
+                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(card.body || "") }}
+              />
             </div>
           ))}
         </div>

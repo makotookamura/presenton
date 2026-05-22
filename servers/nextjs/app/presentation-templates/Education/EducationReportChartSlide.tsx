@@ -1,5 +1,5 @@
 import * as z from "zod";
-
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 import EducationChartPrimitives, {
   type EducationChartDatum,
   type EducationChartType,
@@ -191,9 +191,8 @@ const EducationReportChartSlide = ({ data }: { data: Partial<SchemaType> }) => {
               <p
                 className=" mt-[38px] max-w-[610px] text-[22px] leading-[1.22]"
                 style={{ color: "var(--background-text,#3E3F4A)" }}
-              >
-                {slideData.body}
-              </p>
+                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(slideData.body || "") }}
+              />
             </div>
 
             <p

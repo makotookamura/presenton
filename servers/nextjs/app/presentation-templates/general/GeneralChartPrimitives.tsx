@@ -42,8 +42,10 @@ const chartColor = (element: HTMLElement, index: number) => {
 const chartTextColor = (element: HTMLElement, fallback = "#7f8491") =>
     resolveCssValue(element, `var(--background-text, ${fallback})`, fallback);
 
-const chartFont = (element: HTMLElement) =>
-    resolveCssValue(element, "var(--heading-font-family,Poppins)", "Poppins").replace(/^['"]|['"]$/g, "");
+const chartFont = (element: HTMLElement) => {
+    const base = resolveCssValue(element, "var(--heading-font-family,Poppins)", "Poppins").replace(/^['"]|['"]$/g, "");
+    return `${base}, "Noto Sans JP", sans-serif`;
+};
 
 const withAlpha = (color: string, alpha: number) => {
     const hex = color.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);

@@ -146,8 +146,8 @@ const dynamicSlideLayout: React.FC<LayoutProps> = ({ data: slideData }) => {
                                         <span className="text-white text-[22px] font-bold tracking-wide" style={{ color: 'var(--primary-text, #FFFFFF)' }}>{slideData?.introCard?.initials}</span>
                                     </div>
                                     <div className="leading-tight">
-                                        <div className="text-[22px] font-semibold" style={{ fontFamily: 'Playfair Display', color: 'var(--background-text, #111827)' }}>{slideData?.introCard?.name}</div>
-                                        <div className="text-[15px]" style={{ fontFamily: 'Playfair Display', color: 'var(--background-text, #1B8C2D)' }}>{slideData?.introCard?.date}</div>
+                                        <div className="text-[22px] font-semibold" style={{ fontFamily: 'var(--heading-font-family, "Noto Sans JP", sans-serif)', color: 'var(--background-text, #111827)' }}>{slideData?.introCard?.name}</div>
+                                        <div className="text-[15px]" style={{ fontFamily: 'var(--heading-font-family, "Noto Sans JP", sans-serif)', color: 'var(--background-text, #1B8C2D)' }}>{slideData?.introCard?.date}</div>
                                     </div>
                                 </div>
                             ) : null}
