@@ -280,14 +280,7 @@ async def _persist_custom_fonts(
     return stored_fonts
 
 
-def _create_font_alias_config(raw_fonts: List[str]) -> str:
-    mappings: Dict[str, str] = {}
-    for font_name in raw_fonts:
-        normalized = font_name
-        if not normalized:
-            continue
-        mappings[font_name] = normalized
-
+def _create_font_alias_config(mappings: Dict[str, str]) -> str:
     fd, fonts_conf_path = tempfile.mkstemp(prefix="fonts_alias_", suffix=".conf")
     os.close(fd)
     with open(fonts_conf_path, "w", encoding="utf-8") as cfg:
@@ -363,6 +356,57 @@ def extract_slide_xmls(pptx_path: str, temp_dir: str) -> List[str]:
     return slide_xmls
 
 
+def _build_font_alias_map(
+    pptx_font_names: List[str],
+    installed_font_names: List[str],
+) -> Dict[str, str]:
+    """Map PPTX font names to installed font names using prefix/substring matching.
+
+    For example 'Yu Gothic UI' → 'Yu Gothic' when only Yu Gothic is installed.
+    """
+    aliases: Dict[str, str] = {}
+    installed_lower = {name.lower(): name for name in installed_font_names}
+
+    for pptx_name in pptx_font_names:
+        lower = pptx_name.lower()
+        # exact match — no alias needed
+        if lower in installed_lower:
+            continue
+        # try progressively shorter prefixes (word-boundary aware)
+        words = lower.split()
+        for length in range(len(words) - 1, 0, -1):
+            candidate = " ".join(words[:length])
+            if candidate in installed_lower:
+                aliases[pptx_name] = installed_lower[candidate]
+                break
+        if pptx_name not in aliases:
+            # substring match: installed name is contained in pptx name
+            for inst_lower, inst_orig in installed_lower.items():
+                if inst_lower in lower:
+                    aliases[pptx_name] = inst_orig
+                    break
+
+    return aliases
+
+
+def _get_installed_font_families() -> List[str]:
+    """Return font family names known to fontconfig."""
+    try:
+        result = subprocess.run(
+            ["fc-list", "--format=%{family}\n"],
+            capture_output=True, text=True, timeout=10,
+        )
+        names: set[str] = set()
+        for line in result.stdout.splitlines():
+            for part in line.split(","):
+                part = part.strip()
+                if part:
+                    names.add(part)
+        return list(names)
+    except Exception:
+        return []
+
+
 async def convert_pptx_to_pdf(
     pptx_path: str,
     temp_dir: str,
@@ -373,7 +417,9 @@ async def convert_pptx_to_pdf(
 
     slide_xmls = slide_xmls or extract_slide_xmls(pptx_path, temp_dir)
     raw_fonts = collect_normalized_fonts_from_xmls(slide_xmls)
-    fonts_conf_path = _create_font_alias_config(raw_fonts)
+    installed_families = await asyncio.to_thread(_get_installed_font_families)
+    alias_map = _build_font_alias_map(raw_fonts, installed_families)
+    fonts_conf_path = _create_font_alias_config(alias_map)
     env = os.environ.copy()
     env["FONTCONFIG_FILE"] = fonts_conf_path
 
