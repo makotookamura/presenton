@@ -160,18 +160,58 @@ async def upload_font(
         file_ext = os.path.splitext(font_file.filename)[1].lower()
         base_name = os.path.splitext(font_file.filename)[0]
         unique_filename = f"{base_name}_{str(uuid.uuid4())[:8]}{file_ext}"
-        
+
         # Get fonts directory
         fonts_dir = get_fonts_directory()
         font_path = os.path.join(fonts_dir, unique_filename)
-        
+
         # Save the uploaded file
         with open(font_path, "wb") as buffer:
             shutil.copyfileobj(font_file.file, buffer)
-        
+
+        # For .ttc files, extract sub-fonts to .ttf so browsers can load them
+        if file_ext == ".ttc" and FONTTOOLS_AVAILABLE:
+            try:
+                num_fonts = TTFont(font_path).reader.numFonts
+                first_name = base_name
+                first_url = absolute_fastapi_asset_url(f"/app_data/fonts/{unique_filename}")
+                first_path = font_path
+                for idx in range(num_fonts):
+                    font = TTFont(font_path, fontNumber=idx)
+                    family_name = base_name
+                    if "name" in font:
+                        for record in font["name"].names:
+                            if record.nameID == 1 and record.langID in (0x409, 0):
+                                family_name = record.toUnicode().strip()
+                                break
+                        if family_name == base_name:
+                            for record in font["name"].names:
+                                if record.nameID == 1:
+                                    family_name = record.toUnicode().strip()
+                                    break
+                    import re as _re
+                    safe = _re.sub(r"[^\w\-]", "_", family_name)
+                    ttf_filename = f"{safe}_{uuid.uuid4().hex[:6]}.ttf"
+                    ttf_path = os.path.join(fonts_dir, ttf_filename)
+                    font.save(ttf_path)
+                    font.close()
+                    if idx == 0:
+                        first_name = family_name
+                        first_url = absolute_fastapi_asset_url(f"/app_data/fonts/{ttf_filename}")
+                        first_path = ttf_path
+                return FontUploadResponse(
+                    success=True,
+                    font_name=first_name,
+                    font_url=first_url,
+                    font_path=first_path,
+                    message=f"Font collection '{base_name}' extracted and uploaded successfully"
+                )
+            except Exception as e:
+                print(f"TTC extraction failed, falling back to raw upload: {e}")
+
         # Generate accessible URL
         font_url = absolute_fastapi_asset_url(f"/app_data/fonts/{unique_filename}")
-        
+
         return FontUploadResponse(
             success=True,
             font_name=base_name,

@@ -153,6 +153,48 @@ def _extract_font_name_from_file(file_path: str) -> str:
     return base_name
 
 
+def _extract_ttc_to_ttfs(ttc_path: str, output_dir: str) -> list[tuple[str, str]]:
+    """Extract each sub-font from a .ttc collection into individual .ttf files.
+    Returns list of (font_family_name, ttf_path) tuples."""
+    if not FONTTOOLS_AVAILABLE:
+        return []
+
+    results: list[tuple[str, str]] = []
+    try:
+        num_fonts = TTFont(ttc_path).reader.numFonts
+    except Exception:
+        return []
+
+    for idx in range(num_fonts):
+        try:
+            font = TTFont(ttc_path, fontNumber=idx)
+            family_name = ""
+            if "name" in font:
+                for record in font["name"].names:
+                    if record.nameID == 1 and record.langID in (0x409, 0):
+                        family_name = record.toUnicode().strip()
+                        break
+                if not family_name:
+                    for record in font["name"].names:
+                        if record.nameID == 1:
+                            family_name = record.toUnicode().strip()
+                            break
+            if not family_name:
+                family_name = f"{os.path.splitext(os.path.basename(ttc_path))[0]}_{idx}"
+
+            safe_name = re.sub(r"[^\w\-]", "_", family_name)
+            ttf_filename = f"{safe_name}_{uuid.uuid4().hex[:6]}.ttf"
+            ttf_path = os.path.join(output_dir, ttf_filename)
+            font.save(ttf_path)
+            font.close()
+            results.append((family_name, ttf_path))
+        except Exception as e:
+            print(f"[ttc_extract] sub-font {idx} failed: {e}")
+            continue
+
+    return results
+
+
 def _validate_pptx_file(pptx_file: UploadFile) -> None:
     filename = getattr(pptx_file, "filename", "") or ""
     if not filename.lower().endswith(".pptx"):
@@ -203,6 +245,24 @@ async def _persist_custom_fonts(
         font_bytes = await font_file.read()
 
         await asyncio.to_thread(_write_bytes_to_path, temp_font_path, font_bytes)
+
+        # For .ttc files, extract each sub-font to individual .ttf files
+        # so browsers can load them via @font-face (browsers don't support .ttc)
+        if extension == ".ttc" and FONTTOOLS_AVAILABLE:
+            ttf_entries = await asyncio.to_thread(_extract_ttc_to_ttfs, temp_font_path, fonts_dir)
+            if ttf_entries:
+                for family_name, ttf_path in ttf_entries:
+                    ttf_filename = os.path.basename(ttf_path)
+                    stored_fonts.append(
+                        StoredFont(
+                            display_name=family_name,
+                            url=absolute_fastapi_asset_url(f"/app_data/fonts/{ttf_filename}"),
+                            temp_path=ttf_path,
+                        )
+                    )
+                continue  # skip the original .ttc entry
+            # fallback: save ttc as-is if extraction failed
+
         await asyncio.to_thread(_write_bytes_to_path, permanent_font_path, font_bytes)
 
         actual_font_name = await asyncio.to_thread(
