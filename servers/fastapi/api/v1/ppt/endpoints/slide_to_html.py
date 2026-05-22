@@ -29,6 +29,34 @@ LAYOUT_MANAGEMENT_ROUTER = APIRouter(
 )
 
 
+class SlideToHtmlRequest(BaseModel):
+    image: str
+    xml: str
+    fonts: Optional[List[str]] = None
+
+
+class SlideToHtmlResponse(BaseModel):
+    success: bool
+    html: str
+
+
+class HtmlEditResponse(BaseModel):
+    success: bool
+    edited_html: str
+    message: Optional[str] = None
+
+
+class HtmlToReactRequest(BaseModel):
+    html: str
+    image: Optional[str] = None
+
+
+class HtmlToReactResponse(BaseModel):
+    success: bool
+    react_component: str
+    message: Optional[str] = None
+
+
 class LayoutData(BaseModel):
     presentation: UUID
     layout_id: str
