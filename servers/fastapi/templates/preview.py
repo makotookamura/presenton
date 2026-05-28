@@ -1,26 +1,21 @@
-import asyncio
-from dataclasses import dataclass
-import os
-import re
-import shutil
-import subprocess
-import tempfile
-import uuid
-import zipfile
-from pathlib import Path
-from typing import Dict, List, Optional
+"""
+Template font check and slide preview handlers.
+
+Implementation is ported from presenton-enterprise fonts_and_slides_preview flow,
+adapted for local app_data storage instead of S3.
+"""
+
+from typing import List, Optional
 
 from fastapi import File, HTTPException, UploadFile
-from pydantic import BaseModel
 
-from constants.documents import PPTX_MIME_TYPES
-from services.documents_loader import DocumentsLoader
-from templates.font_utils import (
-    collect_normalized_fonts_from_xmls,
-    get_available_and_unavailable_fonts,
+from templates.fonts_and_slides_preview import (
+    FontCheckResponse,
+    FontInfo,
+    FontsUploadAndSlidesPreviewResponse,
+    check_fonts_in_pptx_handler as _check_fonts_in_pptx_handler,
+    upload_fonts_and_preview_handler,
 )
-from utils.get_env import get_app_data_directory_env
-from utils.asset_directory_utils import absolute_fastapi_asset_url
 
 try:
     from fontTools.ttLib import TTFont
@@ -514,27 +509,9 @@ async def get_available_and_unavailable_fonts_for_pptx(
 
 
 async def check_fonts_in_pptx_handler(
-    pptx_file: UploadFile = File(..., description="PPTX file to analyze fonts from")
+    pptx_file: UploadFile = File(..., description="PPTX file to analyze fonts from"),
 ) -> FontCheckResponse:
-    _validate_pptx_file(pptx_file)
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        pptx_path = os.path.join(temp_dir, "presentation.pptx")
-        pptx_content = await pptx_file.read()
-        await asyncio.to_thread(_write_bytes_to_path, pptx_path, pptx_content)
-
-        available_fonts_data, unavailable_fonts_data = (
-            await get_available_and_unavailable_fonts_for_pptx(pptx_path, temp_dir)
-        )
-
-    return FontCheckResponse(
-        available_fonts=[
-            FontInfo(name=name, url=url) for name, url in available_fonts_data
-        ],
-        unavailable_fonts=[
-            FontInfo(name=name, url=url) for name, url in unavailable_fonts_data
-        ],
-    )
+    return await _check_fonts_in_pptx_handler(pptx_file)
 
 
 async def upload_fonts_and_slides_preview_handler(
@@ -543,55 +520,9 @@ async def upload_fonts_and_slides_preview_handler(
     original_font_names: Optional[List[str]] = None,
     max_slides: Optional[int] = None,
 ) -> FontsUploadAndSlidesPreviewResponse:
-    if (font_files and not original_font_names) or (
-        original_font_names and not font_files
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Both font_files and original_font_names must be provided together",
-        )
-    if font_files and original_font_names and len(font_files) != len(original_font_names):
-        raise HTTPException(
-            status_code=400,
-            detail="Number of font files must match number of original font names",
-        )
-
-    _validate_pptx_file(pptx_file)
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        pptx_path = os.path.join(temp_dir, "presentation.pptx")
-        pptx_content = await pptx_file.read()
-        await asyncio.to_thread(_write_bytes_to_path, pptx_path, pptx_content)
-
-        stored_fonts = await _persist_custom_fonts(
-            font_files=font_files,
-            original_font_names=original_font_names,
-            temp_dir=temp_dir,
-        )
-        await _install_fonts([font.temp_path for font in stored_fonts])
-
-        slide_xmls = extract_slide_xmls(pptx_path, temp_dir)
-        pdf_path = await convert_pptx_to_pdf(pptx_path, temp_dir, slide_xmls=slide_xmls)
-        screenshot_paths = await DocumentsLoader.get_page_images_from_pdf_async(
-            pdf_path, temp_dir
-        )
-
-        if max_slides and len(screenshot_paths) > max_slides:
-            screenshot_paths = screenshot_paths[:max_slides]
-
-        session_id = uuid.uuid4()
-        slide_image_urls = await store_slide_images(screenshot_paths, session_id)
-        pptx_url = await store_uploaded_pptx(pptx_path, session_id)
-
-        available_fonts, _ = await get_available_and_unavailable_fonts(
-            collect_normalized_fonts_from_xmls(slide_xmls)
-        )
-        fonts: dict[str, str] = {name: url for name, url in available_fonts}
-        fonts.update({font.display_name: font.url for font in stored_fonts})
-
-        return FontsUploadAndSlidesPreviewResponse(
-            slide_image_urls=slide_image_urls,
-            pptx_url=pptx_url,
-            modified_pptx_url=pptx_url,
-            fonts=fonts,
-        )
+    return await upload_fonts_and_preview_handler(
+        pptx_file=pptx_file,
+        font_files=font_files,
+        original_font_names=original_font_names,
+        max_slides=max_slides or 25,
+    )

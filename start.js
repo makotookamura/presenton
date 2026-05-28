@@ -312,9 +312,72 @@ if (!process.env.FAST_API_INTERNAL_URL) {
 const setupUserConfigFromEnv = () => {
   let existingConfig = readUserConfig();
 
-  if (!["ollama", "openai", "google", "vertex", "azure", "openrouter", "cerebras", "anthropic", "litellm", "custom", "codex"].includes(existingConfig.LLM)) {
+  if (!["ollama", "openai", "google", "vertex", "azure", "bedrock", "openrouter", "fireworks", "together", "cerebras", "anthropic", "litellm", "lmstudio", "custom", "codex"].includes(existingConfig.LLM)) {
     existingConfig.LLM = undefined;
   }
+
+  const envValue = (key) => {
+    const value = process.env[key];
+    return value === undefined || value === "" ? undefined : value;
+  };
+
+  const configValue = (key) => envValue(key) ?? existingConfig[key];
+
+  const parseBooleanLike = (value) => {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+    return undefined;
+  };
+
+  const normalizeImageConfig = (config) => {
+    const parsedDisableImageGeneration = parseBooleanLike(
+      config.DISABLE_IMAGE_GENERATION
+    );
+    if (parsedDisableImageGeneration !== undefined) {
+      config.DISABLE_IMAGE_GENERATION = parsedDisableImageGeneration;
+    }
+
+    if (config.DISABLE_IMAGE_GENERATION || config.IMAGE_PROVIDER) {
+      return config;
+    }
+
+    if (
+      config.OPENAI_COMPAT_IMAGE_BASE_URL &&
+      config.OPENAI_COMPAT_IMAGE_API_KEY &&
+      config.OPENAI_COMPAT_IMAGE_MODEL
+    ) {
+      config.IMAGE_PROVIDER = "openai_compatible";
+    } else if (config.OPEN_WEBUI_IMAGE_URL) {
+      config.IMAGE_PROVIDER = "open_webui";
+    } else if (config.COMFYUI_URL) {
+      config.IMAGE_PROVIDER = "comfyui";
+    } else if (config.PEXELS_API_KEY) {
+      config.IMAGE_PROVIDER = "pexels";
+    } else if (config.PIXABAY_API_KEY) {
+      config.IMAGE_PROVIDER = "pixabay";
+    } else if (config.LLM === "openai" && config.OPENAI_API_KEY) {
+      config.IMAGE_PROVIDER = "gpt-image-1.5";
+      config.GPT_IMAGE_1_5_QUALITY = config.GPT_IMAGE_1_5_QUALITY || "medium";
+    } else if (config.LLM === "google" && config.GOOGLE_API_KEY) {
+      config.IMAGE_PROVIDER = "gemini_flash";
+    } else {
+      config.DISABLE_IMAGE_GENERATION = true;
+    }
+
+    return config;
+  };
 
   const userConfig = {
     LLM: process.env.LLM || existingConfig.LLM,
@@ -339,6 +402,23 @@ const setupUserConfigFromEnv = () => {
       process.env.AZURE_OPENAI_API_VERSION || existingConfig.AZURE_OPENAI_API_VERSION,
     AZURE_OPENAI_DEPLOYMENT:
       process.env.AZURE_OPENAI_DEPLOYMENT || existingConfig.AZURE_OPENAI_DEPLOYMENT,
+    BEDROCK_REGION: process.env.BEDROCK_REGION || existingConfig.BEDROCK_REGION,
+    BEDROCK_API_KEY: process.env.BEDROCK_API_KEY || existingConfig.BEDROCK_API_KEY,
+    BEDROCK_AWS_ACCESS_KEY_ID:
+      process.env.BEDROCK_AWS_ACCESS_KEY_ID || existingConfig.BEDROCK_AWS_ACCESS_KEY_ID,
+    BEDROCK_AWS_SECRET_ACCESS_KEY:
+      process.env.BEDROCK_AWS_SECRET_ACCESS_KEY || existingConfig.BEDROCK_AWS_SECRET_ACCESS_KEY,
+    BEDROCK_AWS_SESSION_TOKEN:
+      process.env.BEDROCK_AWS_SESSION_TOKEN || existingConfig.BEDROCK_AWS_SESSION_TOKEN,
+    BEDROCK_PROFILE_NAME:
+      process.env.BEDROCK_PROFILE_NAME || existingConfig.BEDROCK_PROFILE_NAME,
+    BEDROCK_MODEL: process.env.BEDROCK_MODEL || existingConfig.BEDROCK_MODEL,
+    FIREWORKS_API_KEY: process.env.FIREWORKS_API_KEY || existingConfig.FIREWORKS_API_KEY,
+    FIREWORKS_MODEL: process.env.FIREWORKS_MODEL || existingConfig.FIREWORKS_MODEL,
+    FIREWORKS_BASE_URL: process.env.FIREWORKS_BASE_URL || existingConfig.FIREWORKS_BASE_URL,
+    TOGETHER_API_KEY: process.env.TOGETHER_API_KEY || existingConfig.TOGETHER_API_KEY,
+    TOGETHER_MODEL: process.env.TOGETHER_MODEL || existingConfig.TOGETHER_MODEL,
+    TOGETHER_BASE_URL: process.env.TOGETHER_BASE_URL || existingConfig.TOGETHER_BASE_URL,
     OLLAMA_URL: process.env.OLLAMA_URL || existingConfig.OLLAMA_URL,
     OLLAMA_MODEL: process.env.OLLAMA_MODEL || existingConfig.OLLAMA_MODEL,
     ANTHROPIC_API_KEY:
@@ -352,6 +432,9 @@ const setupUserConfigFromEnv = () => {
     LITELLM_BASE_URL: process.env.LITELLM_BASE_URL || existingConfig.LITELLM_BASE_URL,
     LITELLM_API_KEY: process.env.LITELLM_API_KEY || existingConfig.LITELLM_API_KEY,
     LITELLM_MODEL: process.env.LITELLM_MODEL || existingConfig.LITELLM_MODEL,
+    LMSTUDIO_BASE_URL: process.env.LMSTUDIO_BASE_URL || existingConfig.LMSTUDIO_BASE_URL,
+    LMSTUDIO_API_KEY: process.env.LMSTUDIO_API_KEY || existingConfig.LMSTUDIO_API_KEY,
+    LMSTUDIO_MODEL: process.env.LMSTUDIO_MODEL || existingConfig.LMSTUDIO_MODEL,
     PEXELS_API_KEY: process.env.PEXELS_API_KEY || existingConfig.PEXELS_API_KEY,
     PIXABAY_API_KEY:
       process.env.PIXABAY_API_KEY || existingConfig.PIXABAY_API_KEY,
@@ -379,7 +462,7 @@ const setupUserConfigFromEnv = () => {
     AUTH_SECRET_KEY: existingConfig.AUTH_SECRET_KEY,
   };
 
-  writeUserConfig(userConfig);
+  writeFileSync(userConfigPath, JSON.stringify(normalizeImageConfig(userConfig)));
 };
 
 const startServers = async (nginxReadyPromise) => {

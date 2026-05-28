@@ -2,7 +2,7 @@
 
 import React, { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { File, Paperclip, Plus, X } from 'lucide-react'
-import { toast } from 'sonner'
+import { notify } from '@/components/ui/sonner'
 
 interface SupportingDocProps {
     files: File[]
@@ -90,9 +90,7 @@ const SupportingDoc = ({
     const handleValidate = (filesToReview: File[]) => {
         const disallowed = filesToReview.filter((file) => !isAllowedFile(file))
         if (disallowed.length > 0) {
-            toast.error('Some files are not supported', {
-                description: 'Supported: Word, PowerPoint, spreadsheets, PDF/TXT, and image files.',
-            })
+            notify.error('Some files are not supported', 'Supported: Word, PowerPoint, spreadsheets, PDF/TXT, and image files.')
         }
     }
 
@@ -101,9 +99,7 @@ const SupportingDoc = ({
             return candidateFiles
         }
 
-        toast.warning('Maximum file limit reached', {
-            description: `You can upload up to ${MAX_SUPPORTED_FILES} documents only.`,
-        })
+        notify.warning('Maximum file limit reached', `You can upload up to ${MAX_SUPPORTED_FILES} documents only.`)
 
         return candidateFiles.slice(0, MAX_SUPPORTED_FILES)
     }
@@ -118,9 +114,7 @@ const SupportingDoc = ({
         onFilesChange(allowedFiles)
         handleValidate(nextFiles)
         if (allowedFiles.length > files.length) {
-            toast.success('Files selected', {
-                description: `${allowedFiles.length - files.length} file(s) have been added`,
-            })
+            notify.success('Files selected', `${allowedFiles.length - files.length} file(s) have been added.`)
         }
         e.currentTarget.value = ''
     }
@@ -138,9 +132,7 @@ const SupportingDoc = ({
         onFilesChange(allowedFiles)
         handleValidate(nextFiles)
         if (allowedFiles.length > files.length) {
-            toast.success('Files selected', {
-                description: `${allowedFiles.length - files.length} file(s) have been added`,
-            })
+            notify.success('Files selected', `${allowedFiles.length - files.length} file(s) have been added.`)
         }
     }
 
