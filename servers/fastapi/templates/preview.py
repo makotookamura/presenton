@@ -35,22 +35,6 @@ SUPPORTED_FONT_EXTENSIONS = {
 }
 
 
-class FontInfo(BaseModel):
-    name: str
-    url: str | None = None
-
-
-class FontCheckResponse(BaseModel):
-    available_fonts: List[FontInfo]
-    unavailable_fonts: List[FontInfo]
-
-
-class FontsUploadAndSlidesPreviewResponse(BaseModel):
-    slide_image_urls: List[str]
-    pptx_url: str
-    modified_pptx_url: str
-    fonts: dict
-
 
 @dataclass
 class StoredFont:
