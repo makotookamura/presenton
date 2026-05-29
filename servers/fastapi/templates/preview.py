@@ -5,7 +5,13 @@ Implementation is ported from presenton-enterprise fonts_and_slides_preview flow
 adapted for local app_data storage instead of S3.
 """
 
-from typing import List, Optional
+import asyncio
+import os
+import re
+import shutil
+import subprocess
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 from fastapi import File, HTTPException, UploadFile
 
