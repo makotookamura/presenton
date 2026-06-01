@@ -10,6 +10,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
