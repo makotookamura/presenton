@@ -3,6 +3,7 @@
 import React from "react";
 import * as z from "zod";
 import { ModernSimpleChart } from "./ModernChartPrimitives";
+import { inlineMarkdownToHtml } from "@/utils/inlineMarkdown";
 
 export const layoutId = "chart-or-table-with-description";
 export const layoutName = "Chart or Table With Description";
@@ -170,9 +171,9 @@ const BusinessModelSlide: React.FC<Props> = ({ data }) => {
                     <thead>
                       <tr>
                         {columns.map((col, idx) => (
-                          <th key={idx} className="text-left text-sm font-semibold px-4 py-3 border-b" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.12))', color: 'var(--primary-color, #1E4CD9)' }}>
-                            {col}
-                          </th>
+                          <th key={idx} className="text-left text-sm font-semibold px-4 py-3 border-b" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.12))', color: 'var(--primary-color, #1E4CD9)' }}
+                            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(col) }}
+                          ></th>
                         ))}
                       </tr>
                     </thead>
@@ -180,9 +181,9 @@ const BusinessModelSlide: React.FC<Props> = ({ data }) => {
                       {rows.map((row, rIdx) => (
                         <tr key={rIdx} className="align-top">
                           {columns.map((_, cIdx) => (
-                            <td key={cIdx} className="text-sm px-4 py-3 border-t" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.08))', color: 'var(--background-text, #334155)' }}>
-                              {row.cells[cIdx] || ''}
-                            </td>
+                            <td key={cIdx} className="text-sm px-4 py-3 border-t" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.08))', color: 'var(--background-text, #334155)' }}
+                              dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(row.cells[cIdx] || '') }}
+                            ></td>
                           ))}
                         </tr>
                       ))}

@@ -1,5 +1,6 @@
 import React from "react";
 import * as z from "zod";
+import { inlineMarkdownToHtml } from "@/utils/inlineMarkdown";
 
 export const layoutId = "table-info-slide";
 export const layoutName = "Table with Info";
@@ -194,8 +195,8 @@ const TableInfoSlideLayout: React.FC<TableInfoSlideLayoutProps> = ({
                         key={index}
                         className="px-6 py-4 font-semibold text-center text-sm sm:text-base"
                         style={{ color: "var(--primary-text,#ffffff)" }}
+                        dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(header) }}
                       >
-                        {header}
                       </div>
                     ))}
                   </div>
@@ -229,8 +230,8 @@ const TableInfoSlideLayout: React.FC<TableInfoSlideLayoutProps> = ({
                                   ? "var(--card-color, #e5e7eb)"
                                   : "var(--card-color, #f3f4f6)",
                             }}
+                            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(cell) }}
                           >
-                            {cell}
                           </div>
                         ))}
                     </div>

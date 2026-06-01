@@ -77,6 +77,12 @@ LibreOffice 起動時に `FONTCONFIG_FILE` 環境変数で渡す。
 ### マージ後にやること
 - `fonts.py` と `preview.py` の TTC 展開コード（`fontTools` 使用部分）が残っているか確認
 - `_build_font_alias_map`、`_create_font_alias_config`、`_install_fonts` 関数が残っているか確認
+- **`preview.py` の先頭インポートが揃っているか確認**（コンフリクト解消で落ちやすい）:
+  ```python
+  import asyncio, os, re, shutil, subprocess, tempfile, uuid
+  from dataclasses import dataclass
+  from typing import Dict, List, Optional
+  ```
 
 ---
 
