@@ -23,6 +23,7 @@ container.db
 .agents
 skills-lock.json
 .codex/
+eng.traineddata
 
 docker-compose-dch.yml
 litellm-config.yaml
