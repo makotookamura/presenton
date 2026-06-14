@@ -12,11 +12,18 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import File, HTTPException, UploadFile
 
+from constants.documents import PPTX_MIME_TYPES
+from templates.font_utils import (
+    collect_normalized_fonts_from_xmls,
+    get_available_and_unavailable_fonts,
+)
 from templates.fonts_and_slides_preview import (
     FontCheckResponse,
     FontInfo,
@@ -24,6 +31,8 @@ from templates.fonts_and_slides_preview import (
     check_fonts_in_pptx_handler as _check_fonts_in_pptx_handler,
     upload_fonts_and_preview_handler,
 )
+from utils.asset_directory_utils import absolute_fastapi_asset_url
+from utils.get_env import get_app_data_directory_env
 
 try:
     from fontTools.ttLib import TTFont

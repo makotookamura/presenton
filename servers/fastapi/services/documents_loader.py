@@ -21,6 +21,7 @@ from services.document_conversion_service import (
     DocumentConversionService,
 )
 from services.liteparse_service import LiteParseError, LiteParseService
+from services.temp_file_service import TEMP_FILE_SERVICE
 from services.office_document_service import (
     OfficeDocumentError,
     extract_office_document_text,
