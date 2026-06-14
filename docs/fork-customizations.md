@@ -128,18 +128,65 @@ Chart.js でのフォント指定に `"Noto Sans JP"` をフォールバック�
 
 ---
 
+## import漏れ検証（最重要・毎回必須）
+
+マージ後のコンフリクト解消で import 文が落ち、起動時や特定コードパス実行時に
+`NameError` でクラッシュする事故が繰り返し発生している。
+**コンフリクトが無くても import 漏れは起きる**（auto-merge でブロックが欠落するため）。
+
+`py_compile` は構文しか見ないので不十分。**pyflakes** で未定義名（import漏れの本質）を検出する:
+
+```bash
+cd servers/fastapi
+python3 -m pip install --quiet pyflakes   # 依存が軽い。未導入なら一度だけ
+
+# バックエンド全体を網羅スキャン（tests除く）。"undefined name" が出たら import漏れ
+find . -name "*.py" -not -path "./tests/*" | while read f; do
+  python3 -m pyflakes "$f" 2>&1 | grep -i "undefined name"
+done
+# 出力が無ければ import漏れゼロ
+```
+
+> 注: `ModuleNotFoundError: No module named 'fastapi'` は実 import 検証時に出るが、
+> これは依存が Docker 内にしか無いため。import **漏れ** の検証は pyflakes で行うこと。
+
+### 過去に落ちた実例（再発防止）
+- `preview.py`: `Path`, `zipfile`, `PPTX_MIME_TYPES`, `absolute_fastapi_asset_url`,
+  `get_app_data_directory_env`, `collect_normalized_fonts_from_xmls`,
+  `get_available_and_unavailable_fonts` が未 import → 追加済み。
+  先頭 import ブロックの最低ライン:
+  ```python
+  import asyncio, os, re, shutil, subprocess, tempfile, uuid, zipfile
+  from dataclasses import dataclass
+  from pathlib import Path
+  from typing import Dict, List, Optional
+  from constants.documents import PPTX_MIME_TYPES
+  from templates.font_utils import (
+      collect_normalized_fonts_from_xmls, get_available_and_unavailable_fonts,
+  )
+  from utils.asset_directory_utils import absolute_fastapi_asset_url
+  from utils.get_env import get_app_data_directory_env
+  ```
+- `services/documents_loader.py`: `TEMP_FILE_SERVICE` 未 import（upstream/main 自体のバグ）
+  → `from services.temp_file_service import TEMP_FILE_SERVICE` を追加済み。
+
+---
+
 ## マージ作業チェックリスト
 
 upstream (`upstream/main`) をマージするたびに以下を確認・修正:
 
 ```
+[ ] pyflakes でバックエンド全体の "undefined name" がゼロ（最重要）
 [ ] slide_to_html.py — ルーター・モデル・関数の定義が残っているか
-[ ] router.py — 3つのルーター (SLIDE_TO_HTML_ROUTER 等) が include されているか
+[ ] router.py — 4つのルーター (LAYOUT_MANAGEMENT_ROUTER, SLIDE_TO_HTML_ROUTER 等) が include されているか
 [ ] fonts.py — TTC→TTF展開コードが残っているか
-[ ] preview.py — TTC展開・フォントエイリアス関連関数が残っているか
+[ ] preview.py — import群・TTC展開・フォントエイリアス関連関数が残っているか
 [ ] inlineMarkdown.ts — ファイルが存在するか
+[ ] 3テーブルテンプレート — inlineMarkdownToHtml が残っているか
+       (TableInfoSlideLayout, ChartOrTableWithMetricsDescription, ChartOrTableWithDescription)
 [ ] 新規テンプレート — inlineMarkdownToHtml 適用が必要か
 [ ] 新規ChartPrimitives — Noto Sans JP フォールバック追加が必要か
-[ ] layout.tsx — Noto Sans JP グローバルロードが残っているか
+[ ] layout.tsx / (export)/layout.tsx — Noto Sans JP ロードが残っているか
 [ ] constants.ts — edge-yellow テーマフォント設定が正しいか
 ```
