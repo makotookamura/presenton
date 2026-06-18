@@ -16,7 +16,7 @@ from constants.presentation import DEFAULT_TEMPLATES
 from models.sql.presentation_layout_code import PresentationLayoutCodeModel
 from models.sql.template import TemplateModel
 from models.sql.template_create_info import TemplateCreateInfoModel
-from services.database import get_async_session
+from services.database import async_session_maker, get_async_session
 from services.export_task_service import EXPORT_TASK_SERVICE
 from templates.example import build_template_example
 from templates.get_layout_by_name import get_layout_by_name
@@ -31,6 +31,12 @@ from templates.prompts import (
     SLIDE_LAYOUT_EDIT_SYSTEM_PROMPT,
 )
 from templates.providers import edit_slide_layout_code, generate_slide_layout_code
+from templates.slide_layout_jobs import (
+    SlideLayoutJobStartResponse,
+    SlideLayoutJobStatusResponse,
+    start_slide_layout_job,
+    get_slide_layout_job,
+)
 from utils.asset_directory_utils import (
     resolve_app_path_to_filesystem,
     resolve_image_path_to_filesystem,
@@ -157,14 +163,50 @@ def _strip_code_fences(value: str) -> str:
     )
 
 
-def _normalize_layout_code_for_create(code: str) -> str:
-    normalized = _strip_code_fences(code)
-    normalized = (
-        normalized.replace("image_url", "__image_url__")
-        .replace("icon_url", "__icon_url__")
-        .replace("image_prompt", "__image_prompt__")
-        .replace("icon_query", "__icon_query__")
+_ASSET_FIELD_REPLACEMENTS = {
+    "image_url": "__image_url__",
+    "icon_url": "__icon_url__",
+    "image_prompt": "__image_prompt__",
+    "icon_query": "__icon_query__",
+}
+
+_ASSET_FIELD_DEFAULTS = {
+    "__image_url__": "/static/images/replaceable_template_image.png",
+    "__icon_url__": "/static/icons/placeholder.svg",
+    "__image_prompt__": "replaceable image",
+    "__icon_query__": "placeholder icon",
+}
+
+
+def _normalize_asset_fields(code: str) -> str:
+    normalized = code
+    for field_name, normalized_name in _ASSET_FIELD_REPLACEMENTS.items():
+        normalized = re.sub(
+            rf"(?<!_)\b{re.escape(field_name)}\b(?!_)",
+            normalized_name,
+            normalized,
+        )
+
+    # Models occasionally emit a bare object shorthand without a comma/value:
+    #   icon: {
+    #     __icon_url__
+    #     __icon_query__: "play"
+    #   }
+    # These asset fields are not in scope as variables, so make them valid defaults.
+    def replace_bare_asset_field(match: re.Match[str]) -> str:
+        indentation, field_name = match.groups()
+        default_value = _ASSET_FIELD_DEFAULTS[field_name]
+        return f'{indentation}{field_name}: "{default_value}",'
+
+    return re.sub(
+        r"(?m)^(\s*)(__(?:image_url|icon_url|image_prompt|icon_query)__)\s*,?\s*$",
+        replace_bare_asset_field,
+        normalized,
     )
+
+
+def _normalize_layout_code_for_create(code: str) -> str:
+    normalized = _normalize_asset_fields(_strip_code_fences(code))
 
     first_import_match = re.search(r"(?m)^\s*import\b", normalized)
     if first_import_match:
@@ -434,10 +476,10 @@ async def init_create_template(
     return template_create_info.id
 
 
-async def create_slide_layout(
-    request: CreateSlideLayoutRequest = Body(...),
-    sql_session: AsyncSession = Depends(get_async_session),
-):
+async def _create_slide_layout_impl(
+    sql_session: AsyncSession,
+    request: CreateSlideLayoutRequest,
+) -> CreateSlideLayoutResponse:
     template_info = await sql_session.get(TemplateCreateInfoModel, request.id)
     if not template_info:
         raise HTTPException(status_code=400, detail="Template not found")
@@ -467,6 +509,40 @@ async def create_slide_layout(
     return CreateSlideLayoutResponse(react_component=normalized_react_component)
 
 
+async def create_slide_layout(
+    request: CreateSlideLayoutRequest = Body(...),
+    sql_session: AsyncSession = Depends(get_async_session),
+):
+    return await _create_slide_layout_impl(sql_session, request)
+
+
+async def create_slide_layout_job_start(
+    request: CreateSlideLayoutRequest = Body(...),
+):
+    req = request.model_copy()
+
+    async def work() -> str:
+        async with async_session_maker() as session:
+            result = await _create_slide_layout_impl(session, req)
+            return result.react_component
+
+    job_id = await start_slide_layout_job(work)
+    return SlideLayoutJobStartResponse(job_id=job_id)
+
+
+async def create_slide_layout_job_status(
+    job_id: uuid.UUID,
+):
+    rec = await get_slide_layout_job(str(job_id))
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return SlideLayoutJobStatusResponse(
+        status=rec.status,
+        react_component=rec.react_component,
+        error=rec.error,
+    )
+
+
 async def edit_slide_layout(
     request: EditSlideLayoutRequest,
 ):
@@ -475,7 +551,9 @@ async def edit_slide_layout(
         system_prompt=SLIDE_LAYOUT_EDIT_SYSTEM_PROMPT,
         user_text=user_text,
     )
-    return EditSlideLayoutResponse(react_component=_strip_code_fences(react_component))
+    return EditSlideLayoutResponse(
+        react_component=_normalize_asset_fields(_strip_code_fences(react_component))
+    )
 
 
 async def edit_slide_layout_section(
@@ -491,7 +569,7 @@ async def edit_slide_layout_section(
         user_text=user_text,
     )
     return EditSlideLayoutSectionResponse(
-        react_component=_strip_code_fences(react_component)
+        react_component=_normalize_asset_fields(_strip_code_fences(react_component))
     )
 
 

@@ -23,7 +23,8 @@ export const FONT_OPTIONS: any[] = [
   { name: 'Lato', displayName: 'Lato', cssUrl: 'https://fonts.googleapis.com/css2?family=Lato:wght@100..900&display=swap' },
   { name: 'Source Sans Pro', displayName: 'Source Sans Pro', cssUrl: 'https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@200..900&display=swap' },
   { name: 'Playfair Display', displayName: 'Playfair Display', cssUrl: 'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400..900&display=swap' },
-  { name: 'Roboto', displayName: 'Roboto', cssUrl: 'https://fonts.googleapis.com/css2?family=Roboto:wght@100..900&display=swap' }
+  { name: 'Roboto', displayName: 'Roboto', cssUrl: 'https://fonts.googleapis.com/css2?family=Roboto:wght@100..900&display=swap' },
+  { name: 'Noto Sans JP', displayName: 'Noto Sans JP', cssUrl: 'https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap' }
 ]
 
 export const DEFAULT_THEMES: any[] = [
@@ -56,8 +57,8 @@ export const DEFAULT_THEMES: any[] = [
       },
       fonts: {
         textFont: {
-          name: "Playfair Display",
-          url: "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400..900&display=swap"
+          name: "Noto Sans JP",
+          url: "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap"
         }
       }
     }

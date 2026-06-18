@@ -51,23 +51,53 @@ export const Schema = z.object({
 
 export type SchemaType = z.infer<typeof Schema>;
 
-function getGridTemplateColumns(columnCount: number) {
-  if (columnCount <= 1) {
-    return "minmax(0, 1fr)";
-  }
-
-  return `minmax(0, 1.4fr) repeat(${columnCount - 1}, minmax(0, 1fr))`;
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
-function renderCell(value: string, isFirstColumn: boolean) {
+function getCellFontSize(columnCount: number, rowCount: number, value: string) {
+  const lengthPenalty = Math.max(0, value.length - 18) * 0.18;
+  const densityPenalty = Math.max(0, columnCount - 4) * 1.2 + Math.max(0, rowCount - 5) * 0.8;
+
+  return clamp(19 - lengthPenalty - densityPenalty, 13, 19);
+}
+
+function normalizeColumns(columns?: string[]) {
+  const validColumns = Array.isArray(columns)
+    ? columns.filter((column) => typeof column === "string" && column.trim())
+    : [];
+
+  return validColumns.length ? validColumns.slice(0, 6) : DEFAULT_TABLE_COLUMNS;
+}
+
+function normalizeRows(rows: Partial<SchemaType>["rows"], columnCount: number) {
+  const validRows = Array.isArray(rows) && rows.length ? rows : DEFAULT_ROWS;
+
+  return validRows.slice(0, 6).map((row) => {
+    const cells = Array.isArray(row?.cells) ? row.cells : [];
+    return {
+      cells: Array.from({ length: columnCount }, (_, index) => cells[index] || ""),
+    };
+  });
+}
+
+function renderCell(value: string, isFirstColumn: boolean, columnCount: number, rowCount: number) {
   if (!isFirstColumn && value && value.toLowerCase() === "check") {
-    return <span className="text-[26px] px-[32px]" style={{ color: "var(--graph-2,#37f08e)" }}>✓</span>;
+    return (
+      <span
+        className="block w-full text-center text-[26px] leading-none"
+        style={{ color: "var(--graph-2,#37f08e)" }}
+      >
+        ✓
+      </span>
+    );
   }
 
   return (
     <span
-      className="text-[18px] px-[32px]"
+      className="block max-w-full overflow-hidden whitespace-normal break-words leading-[130%]"
       style={{
+        fontSize: `${getCellFontSize(columnCount, rowCount, value)}px`,
         color: isFirstColumn
           ? "var(--background-text,#d5dcff)"
           : "var(--background-text,#CAD5E2)",
@@ -79,15 +109,15 @@ function renderCell(value: string, isFirstColumn: boolean) {
 }
 
 const CodeSlide05ComparisonTable = ({ data }: { data: Partial<SchemaType> }) => {
-  const tableColumns = data.tableColumns?.length ? data.tableColumns : DEFAULT_TABLE_COLUMNS;
-  const rows = data.rows?.length ? data.rows : DEFAULT_ROWS;
-  const gridTemplateColumns = getGridTemplateColumns(tableColumns.length);
+  const tableColumns = normalizeColumns(data.tableColumns);
+  const rows = normalizeRows(data.rows, tableColumns.length);
+  const headerFontSize = clamp(18 - Math.max(0, tableColumns.length - 4) * 1.2, 13, 18);
 
   return (
     <>
       <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wght@0,6..12,200..1000;1,6..12,200..1000&display=swap" rel="stylesheet" />
       <div
-        className="relative h-[720px] w-[1280px] overflow-hidden p-[53px]"
+        className="relative flex h-[720px] w-[1280px] flex-col overflow-hidden p-[53px]"
         style={{
           backgroundColor: "var(--background-color,#101B37)",
           fontFamily: "var(--body-font-family,Nunito Sans)",
@@ -97,60 +127,57 @@ const CodeSlide05ComparisonTable = ({ data }: { data: Partial<SchemaType> }) => 
         <h2 className="text-[64px] font-medium" style={{ color: "var(--background-text,#ffffff)" }}>{data.title}</h2>
 
         <div
-          className="mt-[22px] min-h-0 flex-1 rounded-[16px] border"
+          className="mt-[22px] min-h-0 flex-1 overflow-hidden rounded-[16px] border"
           style={{
             backgroundColor: "var(--card-color,#0F172BCC)",
             borderColor: "var(--stroke,#1D293D80)",
           }}
         >
           <div
-            className="grid items-center"
+            role="table"
+            aria-label={data.title || "Comparison table"}
+            className="h-full w-full"
             style={{
               color: "var(--background-text,#8ea1da)",
-              gridTemplateColumns,
+              display: "grid",
+              gridTemplateColumns: `repeat(${tableColumns.length}, minmax(0, 1fr))`,
+              gridTemplateRows: `auto repeat(${rows.length}, minmax(0, 1fr))`,
+              width: "100%",
+              height: "100%",
             }}
           >
-
             {tableColumns.map((column, columnIndex) => (
-              <p
+              <div
                 key={`${column}-${columnIndex}`}
-                className="px-[32px] py-[16px] text-[18px] text-center border-b border-r"
+                role="columnheader"
+                className="min-w-0 overflow-hidden border-b border-r px-[28px] py-[16px] text-left font-normal leading-[120%]"
                 style={{
                   color: "var(--background-text,#ffffff)",
                   borderColor: "var(--stroke,#1D293D80)",
                   borderRightWidth: columnIndex === tableColumns.length - 1 ? "0px" : undefined,
+                  fontSize: `${headerFontSize}px`,
                 }}
               >
                 {column}
-              </p>
-            ))}
-          </div>
-
-          <div className="">
-            {rows.map((row, rowIndex) => (
-              <div
-                key={`row-${rowIndex}`}
-                className="grid"
-                style={{
-                  gridTemplateColumns,
-                }}
-              >
-                {row.cells.map((cell, cellIndex) => (
-                  <div
-                    key={`row-${rowIndex}-cell-${cellIndex}`}
-                    className="flex items-center justify-center border-b border-r px-[20px] py-[20px] text-center"
-                    style={{
-                      borderColor: "var(--stroke,#1D293D80)",
-                      borderRightWidth: cellIndex === row.cells.length - 1 ? "0px" : undefined,
-                    }}
-                  >
-                    {renderCell(cell, cellIndex === 0)}
-                  </div>
-                ))}
               </div>
             ))}
+            {rows.flatMap((row, rowIndex) =>
+              row.cells.map((cell, cellIndex) => (
+                <div
+                  key={`row-${rowIndex}-cell-${cellIndex}`}
+                  role="cell"
+                  className="flex min-h-0 min-w-0 items-center overflow-hidden border-b border-r px-[28px] py-[14px]"
+                  style={{
+                    borderColor: "var(--stroke,#1D293D80)",
+                    borderRightWidth: cellIndex === tableColumns.length - 1 ? "0px" : undefined,
+                    borderBottomWidth: rowIndex === rows.length - 1 ? "0px" : undefined,
+                  }}
+                >
+                  {renderCell(cell, cellIndex === 0, tableColumns.length, rows.length)}
+                </div>
+              ))
+            )}
           </div>
-
         </div>
       </div>
     </>

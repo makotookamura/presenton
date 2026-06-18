@@ -1,5 +1,6 @@
 import { RemoteSvgIcon } from "@/app/hooks/useRemoteSvgIcon";
 import * as z from "zod";
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 
 const AnalysisItemSchema = z.object({
@@ -111,9 +112,8 @@ const DataAnalysisListSlide = ({ data }: { data: Partial<SchemaType> }) => {
               <p
                 className="mt-5 max-w-[420px] text-[24px] leading-[26.667px]  text-[#232223]"
                 style={{ color: "var(--background-text,#232223)" }}
-              >
-                {item.description}
-              </p>
+                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(item.description || "") }}
+              />
             </div>
           ))}
         </div>

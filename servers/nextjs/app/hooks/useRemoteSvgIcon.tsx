@@ -1,4 +1,5 @@
 import React from "react";
+import { resolveBackendAssetUrl } from "@/utils/api";
 
 export type RemoteSvgOptions = {
   strokeColor?: string;
@@ -8,6 +9,12 @@ export type RemoteSvgOptions = {
   color?: string;
  
 };
+
+function isEmptyPaint(value: string | null): boolean {
+  if (value === null) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "none" || normalized === "transparent";
+}
 
 function transformSvg(svgText: string, options: RemoteSvgOptions): string {
   try {
@@ -25,8 +32,34 @@ function transformSvg(svgText: string, options: RemoteSvgOptions): string {
     svgEl.style.position = "relative";
     // Set only provided attributes to avoid clobbering inner shapes
     if (options.className) svgEl.setAttribute("class", options.className);
-    if (options.strokeColor) svgEl.setAttribute("stroke", options.strokeColor);
-    if (options.fillColor !== undefined) svgEl.setAttribute("fill", options.fillColor);
+
+    // Phosphor weights are mixed: line weights use explicit stroke attributes,
+    // fill icons rely on inherited fill, and duotone icons combine inherited
+    // fill/opacity shapes with strokes. Avoid setting stroke on the root or
+    // filled icons get an unwanted outline.
+    const fillColor = options.fillColor ?? options.strokeColor ?? "currentColor";
+    svgEl.setAttribute("fill", fillColor);
+
+    // Recolor explicit fill values too. This covers duotone assets that include
+    // hard-coded fills while preserving fill="none" placeholders/line paths.
+    svgEl.querySelectorAll<SVGElement>("[fill]").forEach((el) => {
+      if (!isEmptyPaint(el.getAttribute("fill"))) {
+        el.setAttribute("fill", fillColor);
+      }
+    });
+
+    if (options.strokeColor) {
+      svgEl.querySelectorAll<SVGElement>("[stroke]").forEach((el) => {
+        if (!isEmptyPaint(el.getAttribute("stroke"))) {
+          el.setAttribute("stroke", options.strokeColor as string);
+        }
+      });
+
+      const rootStroke = svgEl.getAttribute("stroke");
+      if (rootStroke && !isEmptyPaint(rootStroke)) {
+        svgEl.setAttribute("stroke", options.strokeColor);
+      }
+    }
 
   
       const viewBox = svgEl.getAttribute("viewBox");
@@ -114,11 +147,15 @@ function cacheSet(key: string, value: string) {
 export function useRemoteSvgIcon(url?: string, options: RemoteSvgOptions = {}) {
   const [svgMarkup, setSvgMarkup] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const resolvedUrl = React.useMemo(
+    () => resolveBackendAssetUrl(url),
+    [url]
+  );
 
   React.useEffect(() => {
     let cancelled = false;
     async function run() {
-      if (!url) {
+      if (!resolvedUrl) {
         // build simple fallback svg
         const stroke = options.strokeColor || "currentColor";
         const fill = options.fillColor ?? "none";
@@ -127,7 +164,7 @@ export function useRemoteSvgIcon(url?: string, options: RemoteSvgOptions = {}) {
         return;
       }
       // non-svg extensions fallback
-      if (/\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(url)) {
+      if (/\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(resolvedUrl)) {
         const stroke = options.strokeColor || "currentColor";
         const fill = options.fillColor ?? "none";
         const cls = options.className ? ` class=\"${options.className}\"` : "";
@@ -136,7 +173,7 @@ export function useRemoteSvgIcon(url?: string, options: RemoteSvgOptions = {}) {
       }
 
       // Cache lookup
-      const cacheKey = makeCacheKey(url, options);
+      const cacheKey = makeCacheKey(resolvedUrl, options);
       const cached = cacheGet(cacheKey);
       if (cached) {
         setSvgMarkup(cached);
@@ -145,7 +182,7 @@ export function useRemoteSvgIcon(url?: string, options: RemoteSvgOptions = {}) {
       }
       try {
        
-        const res = await fetch(url);
+        const res = await fetch(resolvedUrl);
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
@@ -176,7 +213,7 @@ export function useRemoteSvgIcon(url?: string, options: RemoteSvgOptions = {}) {
     return () => {
       cancelled = true;
     };
-  }, [url, options.strokeColor, options.fillColor, options.className]);
+  }, [resolvedUrl, options.strokeColor, options.fillColor, options.className]);
 
   return { svgMarkup, error };
 }
@@ -189,11 +226,12 @@ export const RemoteSvgIcon: React.FC<{
   title?: string;
   color?: string;
 }> = ({ url, strokeColor, fillColor, className, title, color }) => {
-  const { svgMarkup } = useRemoteSvgIcon(url, { strokeColor, fillColor, className, title, color });
+  const resolvedUrl = resolveBackendAssetUrl(url);
+  const { svgMarkup } = useRemoteSvgIcon(resolvedUrl, { strokeColor, fillColor, className, title, color });
   if (!svgMarkup) return null;
   return (
     <span
-      data-path={url}
+      data-path={resolvedUrl}
       role={title ? "img" : undefined}
       aria-label={title}
       dangerouslySetInnerHTML={{ __html: svgMarkup }}

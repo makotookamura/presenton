@@ -10,7 +10,7 @@
  */
 
 "use client";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { clearOutlines, setPresentationId } from "@/store/slices/presentationGeneration";
@@ -19,7 +19,7 @@ import { LanguageType, PresentationConfig, ToneType, VerbosityType } from "../ty
 import SupportingDoc from "./SupportingDoc";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "lucide-react";
-import { toast } from "sonner";
+import { notify } from "@/components/ui/sonner";
 import { PresentationGenerationApi } from "../../services/api/presentation-generation";
 import { OverlayLoader } from "@/components/ui/overlay-loader";
 import Wrapper from "@/components/Wrapper";
@@ -35,9 +35,10 @@ const STOCK_IMAGE_PROVIDERS = new Set(["pexels", "pixabay"]);
 const FILE_TYPE_WORD = new Set([".doc", ".docx", ".docm", ".odt", ".rtf"]);
 const FILE_TYPE_PRESENTATION = new Set([".ppt", ".pptx", ".pptm", ".odp"]);
 const FILE_TYPE_SPREADSHEET = new Set([".xls", ".xlsx", ".xlsm", ".ods", ".csv", ".tsv"]);
-const FILE_TYPE_IMAGE = new Set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".svg"]);
+const FILE_TYPE_IMAGE = new Set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp"]);
+const FILE_MIME_IMAGE = new Set(["image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff", "image/webp"]);
 const FILE_TYPE_PDF = new Set([".pdf"]);
-const FILE_TYPE_TEXT = new Set([".txt"]);
+const FILE_TYPE_TEXT = new Set([".txt", ".md", ".markdown"]);
 
 // Types for loading state
 interface LoadingState {
@@ -59,7 +60,7 @@ const getFileCategory = (file: File): string => {
   if (FILE_TYPE_WORD.has(extension)) return "word";
   if (FILE_TYPE_PRESENTATION.has(extension)) return "presentation";
   if (FILE_TYPE_SPREADSHEET.has(extension)) return "spreadsheet";
-  if (FILE_TYPE_IMAGE.has(extension) || (file.type || "").startsWith("image/")) return "image";
+  if (FILE_TYPE_IMAGE.has(extension) || FILE_MIME_IMAGE.has((file.type || "").toLowerCase())) return "image";
   if (FILE_TYPE_PDF.has(extension) || file.type === "application/pdf") return "pdf";
   if (FILE_TYPE_TEXT.has(extension) || file.type === "text/plain") return "text";
   return "other";
@@ -72,6 +73,24 @@ const getSelectedTextModel = (config?: LLMConfig): string => {
       return config.OPENAI_MODEL || "";
     case "google":
       return config.GOOGLE_MODEL || "";
+    case "vertex":
+      return config.VERTEX_MODEL || "";
+    case "azure":
+      return config.AZURE_OPENAI_MODEL || "";
+    case "bedrock":
+      return config.BEDROCK_MODEL || "";
+    case "openrouter":
+      return config.OPENROUTER_MODEL || "";
+    case "fireworks":
+      return config.FIREWORKS_MODEL || "";
+    case "together":
+      return config.TOGETHER_MODEL || "";
+    case "cerebras":
+      return config.CEREBRAS_MODEL || "";
+    case "litellm":
+      return config.LITELLM_MODEL || "";
+    case "lmstudio":
+      return config.LMSTUDIO_MODEL || "";
     case "anthropic":
       return config.ANTHROPIC_MODEL || "";
     case "ollama":
@@ -110,6 +129,15 @@ const UploadPage = () => {
     includeTitleSlide: false,
     webSearch: false,
   });
+
+  useEffect(() => {
+    if (llmConfig?.WEB_GROUNDING !== undefined) {
+      setConfig((current) => ({
+        ...current,
+        webSearch: !!llmConfig.WEB_GROUNDING,
+      }));
+    }
+  }, [llmConfig?.WEB_GROUNDING]);
 
   const [loadingState, setLoadingState] = useState<LoadingState>({
     isLoading: false,
@@ -187,7 +215,8 @@ const UploadPage = () => {
       });
       return true;
     } catch (error: any) {
-      toast.error(
+      notify.error(
+        "Image provider unavailable",
         error?.message ||
         `Unable to reach ${selectedProvider} right now. Please check your API key/settings and try again.`
       );
@@ -202,19 +231,19 @@ const UploadPage = () => {
   const validateConfiguration = (): boolean => {
     if (!config.language) {
       trackUploadValidationFailure("language_missing");
-      toast.error("Please select language");
+      notify.warning("Language required", "Please select a language.");
       return false;
     }
 
     if (files.length > 0 && config.language === LanguageType.Auto) {
       trackUploadValidationFailure("language_auto_with_documents");
-      toast.error("Please choose a language before processing uploaded documents");
+      notify.warning("Language required", "Please choose a language before processing uploaded documents.");
       return false;
     }
 
     if (!config.prompt.trim() && files.length === 0) {
       trackUploadValidationFailure("prompt_or_document_missing");
-      toast.error("No Prompt or Document Provided");
+      notify.warning("Input required", "Provide a prompt or upload at least one document.");
       return false;
     }
     return true;
@@ -344,9 +373,10 @@ const UploadPage = () => {
       duration: 0,
       showProgress: false,
     });
-    toast.error("Error", {
-      description: error.message || "Error in upload page.",
-    });
+    notify.error(
+      "Generation failed",
+      error.message || "Something went wrong while starting your presentation."
+    );
   };
 
   return (
@@ -360,7 +390,7 @@ const UploadPage = () => {
       />
       <div className="rounded-2xl " >
         <div className="flex flex-col gap-4 md:items-center md:flex-row justify-between px-4 ">
-          <CurrentConfig />
+          <CurrentConfig webSearchEnabled={config.webSearch} />
           <ConfigurationSelects
             config={config}
             onConfigChange={handleConfigChange}

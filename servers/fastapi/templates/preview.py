@@ -1,5 +1,11 @@
+"""
+Template font check and slide preview handlers.
+
+Implementation is ported from presenton-enterprise fonts_and_slides_preview flow,
+adapted for local app_data storage instead of S3.
+"""
+
 import asyncio
-from dataclasses import dataclass
 import os
 import re
 import shutil
@@ -7,18 +13,25 @@ import subprocess
 import tempfile
 import uuid
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import File, HTTPException, UploadFile
-from pydantic import BaseModel
 
 from constants.documents import PPTX_MIME_TYPES
-from services.documents_loader import DocumentsLoader
 from templates.font_utils import (
     collect_normalized_fonts_from_xmls,
     get_available_and_unavailable_fonts,
 )
+from templates.fonts_and_slides_preview import (
+    FontCheckResponse,
+    FontInfo,
+    FontsUploadAndSlidesPreviewResponse,
+    check_fonts_in_pptx_handler as _check_fonts_in_pptx_handler,
+    upload_fonts_and_preview_handler,
+)
+from utils.asset_directory_utils import absolute_fastapi_asset_url
 from utils.get_env import get_app_data_directory_env
 
 try:
@@ -32,27 +45,12 @@ except ImportError:
 SUPPORTED_FONT_EXTENSIONS = {
     ".ttf": "font/ttf",
     ".otf": "font/otf",
+    ".ttc": "font/ttf",
     ".woff": "font/woff",
     ".woff2": "font/woff2",
     ".eot": "application/vnd.ms-fontobject",
 }
 
-
-class FontInfo(BaseModel):
-    name: str
-    url: str | None = None
-
-
-class FontCheckResponse(BaseModel):
-    available_fonts: List[FontInfo]
-    unavailable_fonts: List[FontInfo]
-
-
-class FontsUploadAndSlidesPreviewResponse(BaseModel):
-    slide_image_urls: List[str]
-    pptx_url: str
-    modified_pptx_url: str
-    fonts: dict
 
 
 @dataclass
@@ -120,31 +118,77 @@ def _extract_font_name_from_file(file_path: str) -> str:
     if not FONTTOOLS_AVAILABLE:
         return base_name
 
+    is_ttc = file_path.lower().endswith(".ttc")
+    font_indices = range(TTFont(file_path).reader.numFonts) if is_ttc else [None]
+
     try:
-        font = TTFont(file_path)
-        if "name" in font:
-            name_table = font["name"]
-            for name_id in (1, 4, 6):
+        for idx in font_indices:
+            font = TTFont(file_path, fontNumber=idx) if idx is not None else TTFont(file_path)
+            if "name" in font:
+                name_table = font["name"]
+                for name_id in (1, 4, 6):
+                    for record in name_table.names:
+                        if record.nameID != name_id:
+                            continue
+                        if record.langID in (0x409, 0):
+                            font_name = record.toUnicode().strip()
+                            if font_name:
+                                font.close()
+                                return font_name
                 for record in name_table.names:
-                    if record.nameID != name_id:
+                    if record.nameID != 1:
                         continue
-                    if record.langID in (0x409, 0):
-                        font_name = record.toUnicode().strip()
-                        if font_name:
-                            font.close()
-                            return font_name
-            for record in name_table.names:
-                if record.nameID != 1:
-                    continue
-                font_name = record.toUnicode().strip()
-                if font_name:
-                    font.close()
-                    return font_name
-        font.close()
+                    font_name = record.toUnicode().strip()
+                    if font_name:
+                        font.close()
+                        return font_name
+            font.close()
     except Exception:
         pass
 
     return base_name
+
+
+def _extract_ttc_to_ttfs(ttc_path: str, output_dir: str) -> list[tuple[str, str]]:
+    """Extract each sub-font from a .ttc collection into individual .ttf files.
+    Returns list of (font_family_name, ttf_path) tuples."""
+    if not FONTTOOLS_AVAILABLE:
+        return []
+
+    results: list[tuple[str, str]] = []
+    try:
+        num_fonts = TTFont(ttc_path).reader.numFonts
+    except Exception:
+        return []
+
+    for idx in range(num_fonts):
+        try:
+            font = TTFont(ttc_path, fontNumber=idx)
+            family_name = ""
+            if "name" in font:
+                for record in font["name"].names:
+                    if record.nameID == 1 and record.langID in (0x409, 0):
+                        family_name = record.toUnicode().strip()
+                        break
+                if not family_name:
+                    for record in font["name"].names:
+                        if record.nameID == 1:
+                            family_name = record.toUnicode().strip()
+                            break
+            if not family_name:
+                family_name = f"{os.path.splitext(os.path.basename(ttc_path))[0]}_{idx}"
+
+            safe_name = re.sub(r"[^\w\-]", "_", family_name)
+            ttf_filename = f"{safe_name}_{uuid.uuid4().hex[:6]}.ttf"
+            ttf_path = os.path.join(output_dir, ttf_filename)
+            font.save(ttf_path)
+            font.close()
+            results.append((family_name, ttf_path))
+        except Exception as e:
+            print(f"[ttc_extract] sub-font {idx} failed: {e}")
+            continue
+
+    return results
 
 
 def _validate_pptx_file(pptx_file: UploadFile) -> None:
@@ -197,6 +241,24 @@ async def _persist_custom_fonts(
         font_bytes = await font_file.read()
 
         await asyncio.to_thread(_write_bytes_to_path, temp_font_path, font_bytes)
+
+        # For .ttc files, extract each sub-font to individual .ttf files
+        # so browsers can load them via @font-face (browsers don't support .ttc)
+        if extension == ".ttc" and FONTTOOLS_AVAILABLE:
+            ttf_entries = await asyncio.to_thread(_extract_ttc_to_ttfs, temp_font_path, fonts_dir)
+            if ttf_entries:
+                for family_name, ttf_path in ttf_entries:
+                    ttf_filename = os.path.basename(ttf_path)
+                    stored_fonts.append(
+                        StoredFont(
+                            display_name=family_name,
+                            url=absolute_fastapi_asset_url(f"/app_data/fonts/{ttf_filename}"),
+                            temp_path=ttf_path,
+                        )
+                    )
+                continue  # skip the original .ttc entry
+            # fallback: save ttc as-is if extraction failed
+
         await asyncio.to_thread(_write_bytes_to_path, permanent_font_path, font_bytes)
 
         actual_font_name = await asyncio.to_thread(
@@ -206,7 +268,7 @@ async def _persist_custom_fonts(
         stored_fonts.append(
             StoredFont(
                 display_name=display_name,
-                url=f"/app_data/fonts/{unique_name}",
+                url=absolute_fastapi_asset_url(f"/app_data/fonts/{unique_name}"),
                 temp_path=temp_font_path,
             )
         )
@@ -214,14 +276,7 @@ async def _persist_custom_fonts(
     return stored_fonts
 
 
-def _create_font_alias_config(raw_fonts: List[str]) -> str:
-    mappings: Dict[str, str] = {}
-    for font_name in raw_fonts:
-        normalized = font_name
-        if not normalized:
-            continue
-        mappings[font_name] = normalized
-
+def _create_font_alias_config(mappings: Dict[str, str]) -> str:
     fd, fonts_conf_path = tempfile.mkstemp(prefix="fonts_alias_", suffix=".conf")
     os.close(fd)
     with open(fonts_conf_path, "w", encoding="utf-8") as cfg:
@@ -297,6 +352,57 @@ def extract_slide_xmls(pptx_path: str, temp_dir: str) -> List[str]:
     return slide_xmls
 
 
+def _build_font_alias_map(
+    pptx_font_names: List[str],
+    installed_font_names: List[str],
+) -> Dict[str, str]:
+    """Map PPTX font names to installed font names using prefix/substring matching.
+
+    For example 'Yu Gothic UI' → 'Yu Gothic' when only Yu Gothic is installed.
+    """
+    aliases: Dict[str, str] = {}
+    installed_lower = {name.lower(): name for name in installed_font_names}
+
+    for pptx_name in pptx_font_names:
+        lower = pptx_name.lower()
+        # exact match — no alias needed
+        if lower in installed_lower:
+            continue
+        # try progressively shorter prefixes (word-boundary aware)
+        words = lower.split()
+        for length in range(len(words) - 1, 0, -1):
+            candidate = " ".join(words[:length])
+            if candidate in installed_lower:
+                aliases[pptx_name] = installed_lower[candidate]
+                break
+        if pptx_name not in aliases:
+            # substring match: installed name is contained in pptx name
+            for inst_lower, inst_orig in installed_lower.items():
+                if inst_lower in lower:
+                    aliases[pptx_name] = inst_orig
+                    break
+
+    return aliases
+
+
+def _get_installed_font_families() -> List[str]:
+    """Return font family names known to fontconfig."""
+    try:
+        result = subprocess.run(
+            ["fc-list", "--format=%{family}\n"],
+            capture_output=True, text=True, timeout=10,
+        )
+        names: set[str] = set()
+        for line in result.stdout.splitlines():
+            for part in line.split(","):
+                part = part.strip()
+                if part:
+                    names.add(part)
+        return list(names)
+    except Exception:
+        return []
+
+
 async def convert_pptx_to_pdf(
     pptx_path: str,
     temp_dir: str,
@@ -307,7 +413,9 @@ async def convert_pptx_to_pdf(
 
     slide_xmls = slide_xmls or extract_slide_xmls(pptx_path, temp_dir)
     raw_fonts = collect_normalized_fonts_from_xmls(slide_xmls)
-    fonts_conf_path = _create_font_alias_config(raw_fonts)
+    installed_families = await asyncio.to_thread(_get_installed_font_families)
+    alias_map = _build_font_alias_map(raw_fonts, installed_families)
+    fonts_conf_path = _create_font_alias_config(alias_map)
     env = os.environ.copy()
     env["FONTCONFIG_FILE"] = fonts_conf_path
 
@@ -365,9 +473,15 @@ async def store_slide_images(
 
         if os.path.exists(screenshot_path) and os.path.getsize(screenshot_path) > 0:
             await asyncio.to_thread(_copy_file, screenshot_path, destination_path)
-            slide_image_urls.append(f"/app_data/images/{session_id}/{file_name}")
+            slide_image_urls.append(
+                absolute_fastapi_asset_url(f"/app_data/images/{session_id}/{file_name}")
+            )
         else:
-            slide_image_urls.append("/static/images/replaceable_template_image.png")
+            slide_image_urls.append(
+                absolute_fastapi_asset_url(
+                    "/static/images/replaceable_template_image.png"
+                )
+            )
 
     return slide_image_urls
 
@@ -382,7 +496,9 @@ async def store_uploaded_pptx(
 
     destination_path = os.path.join(target_dir, "presentation.pptx")
     await asyncio.to_thread(_copy_file, pptx_path, destination_path)
-    return f"/app_data/uploads/template-previews/{session_id}/presentation.pptx"
+    return absolute_fastapi_asset_url(
+        f"/app_data/uploads/template-previews/{session_id}/presentation.pptx"
+    )
 
 
 async def get_available_and_unavailable_fonts_for_pptx(
@@ -394,27 +510,9 @@ async def get_available_and_unavailable_fonts_for_pptx(
 
 
 async def check_fonts_in_pptx_handler(
-    pptx_file: UploadFile = File(..., description="PPTX file to analyze fonts from")
+    pptx_file: UploadFile = File(..., description="PPTX file to analyze fonts from"),
 ) -> FontCheckResponse:
-    _validate_pptx_file(pptx_file)
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        pptx_path = os.path.join(temp_dir, "presentation.pptx")
-        pptx_content = await pptx_file.read()
-        await asyncio.to_thread(_write_bytes_to_path, pptx_path, pptx_content)
-
-        available_fonts_data, unavailable_fonts_data = (
-            await get_available_and_unavailable_fonts_for_pptx(pptx_path, temp_dir)
-        )
-
-    return FontCheckResponse(
-        available_fonts=[
-            FontInfo(name=name, url=url) for name, url in available_fonts_data
-        ],
-        unavailable_fonts=[
-            FontInfo(name=name, url=url) for name, url in unavailable_fonts_data
-        ],
-    )
+    return await _check_fonts_in_pptx_handler(pptx_file)
 
 
 async def upload_fonts_and_slides_preview_handler(
@@ -423,55 +521,9 @@ async def upload_fonts_and_slides_preview_handler(
     original_font_names: Optional[List[str]] = None,
     max_slides: Optional[int] = None,
 ) -> FontsUploadAndSlidesPreviewResponse:
-    if (font_files and not original_font_names) or (
-        original_font_names and not font_files
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Both font_files and original_font_names must be provided together",
-        )
-    if font_files and original_font_names and len(font_files) != len(original_font_names):
-        raise HTTPException(
-            status_code=400,
-            detail="Number of font files must match number of original font names",
-        )
-
-    _validate_pptx_file(pptx_file)
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        pptx_path = os.path.join(temp_dir, "presentation.pptx")
-        pptx_content = await pptx_file.read()
-        await asyncio.to_thread(_write_bytes_to_path, pptx_path, pptx_content)
-
-        stored_fonts = await _persist_custom_fonts(
-            font_files=font_files,
-            original_font_names=original_font_names,
-            temp_dir=temp_dir,
-        )
-        await _install_fonts([font.temp_path for font in stored_fonts])
-
-        slide_xmls = extract_slide_xmls(pptx_path, temp_dir)
-        pdf_path = await convert_pptx_to_pdf(pptx_path, temp_dir, slide_xmls=slide_xmls)
-        screenshot_paths = await DocumentsLoader.get_page_images_from_pdf_async(
-            pdf_path, temp_dir
-        )
-
-        if max_slides and len(screenshot_paths) > max_slides:
-            screenshot_paths = screenshot_paths[:max_slides]
-
-        session_id = uuid.uuid4()
-        slide_image_urls = await store_slide_images(screenshot_paths, session_id)
-        pptx_url = await store_uploaded_pptx(pptx_path, session_id)
-
-        available_fonts, _ = await get_available_and_unavailable_fonts(
-            collect_normalized_fonts_from_xmls(slide_xmls)
-        )
-        fonts: dict[str, str] = {name: url for name, url in available_fonts}
-        fonts.update({font.display_name: font.url for font in stored_fonts})
-
-        return FontsUploadAndSlidesPreviewResponse(
-            slide_image_urls=slide_image_urls,
-            pptx_url=pptx_url,
-            modified_pptx_url=pptx_url,
-            fonts=fonts,
-        )
+    return await upload_fonts_and_preview_handler(
+        pptx_file=pptx_file,
+        font_files=font_files,
+        original_font_names=original_font_names,
+        max_slides=max_slides or 25,
+    )

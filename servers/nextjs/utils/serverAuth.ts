@@ -1,10 +1,12 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { isAuthDisabled } from "@/utils/auth";
 
 type AuthStatus = {
   configured: boolean;
   authenticated: boolean;
   username: string | null;
+  available: boolean;
 };
 
 /**
@@ -31,6 +33,15 @@ function getServerFastApiBase(): string {
  * (the layout only runs for routes that exist and sit under the layout’s segment).
  */
 export async function getServerAuthStatus(): Promise<AuthStatus> {
+  if (isAuthDisabled()) {
+    return {
+      configured: true,
+      authenticated: true,
+      username: "electron",
+      available: true,
+    };
+  }
+
   const h = await headers();
   const cookie = h.get("cookie") ?? "";
 
@@ -46,6 +57,7 @@ export async function getServerAuthStatus(): Promise<AuthStatus> {
         configured: true,
         authenticated: false,
         username: null,
+        available: false,
       };
     }
     const data = (await response.json()) as Partial<AuthStatus>;
@@ -53,12 +65,14 @@ export async function getServerAuthStatus(): Promise<AuthStatus> {
       configured: Boolean(data.configured),
       authenticated: Boolean(data.authenticated),
       username: data.username ?? null,
+      available: true,
     };
   } catch {
     return {
       configured: true,
       authenticated: false,
       username: null,
+      available: false,
     };
   }
 }
@@ -68,7 +82,13 @@ export async function getServerAuthStatus(): Promise<AuthStatus> {
  * If configured but not signed in, send to login with a query flag the client turns into a toast.
  */
 export async function requireAppSession() {
+  if (isAuthDisabled()) {
+    return;
+  }
   const s = await getServerAuthStatus();
+  if (!s.available) {
+    redirect("/");
+  }
   if (!s.configured) {
     redirect("/");
   }

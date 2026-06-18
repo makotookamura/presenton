@@ -2,14 +2,31 @@ import asyncio
 import json
 import os
 from fastembed_vectorstore import FastembedEmbeddingModel, FastembedVectorstore
+from utils.asset_directory_utils import absolute_fastapi_asset_url
+from utils.icon_weights import (
+    ALLOWED_ICON_WEIGHTS,
+    DEFAULT_ICON_WEIGHT,
+    normalize_icon_weight,
+)
 from utils.path_helpers import get_resource_path, get_writable_path
+
+
+def _icon_fastembed_cache_directory() -> str:
+    """ONNX weights for icon search (MiniLM). Prefer a path outside ``APP_DATA_DIRECTORY``
+    in Docker: ``./app_data`` is often bind-mounted and would hide weights baked at image build.
+    """
+    override = (os.getenv("PRESENTON_FASTEMBED_ICON_CACHE_DIR") or "").strip()
+    if override:
+        path = os.path.abspath(override)
+        os.makedirs(path, exist_ok=True)
+        return path
+    return get_writable_path("fastembed_cache")
 
 
 class IconFinderService:
     def __init__(self):
         self.model = FastembedEmbeddingModel.AllMiniLML6V2
-        # Use writable path for cache since it needs to be modified
-        self.cache_directory = get_writable_path("fastembed_cache")
+        self.cache_directory = _icon_fastembed_cache_directory()
         self.vectorstore = None
         self._initialized = False
         self._initialization_failed = False
@@ -117,17 +134,43 @@ class IconFinderService:
             self._initialize_icons_collection()
         return self.vectorstore is not None and not self._initialization_failed
 
-    async def search_icons(self, query: str, k: int = 1):
+    @staticmethod
+    def _base_icon_name(icon_name: str) -> str:
+        name = icon_name.split("||")[0]
+        for weight in ALLOWED_ICON_WEIGHTS:
+            suffix = f"-{weight}"
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+
+    @staticmethod
+    def _icon_filename_for_weight(base_name: str, weight: str) -> str:
+        if weight == "regular":
+            return f"{base_name}.svg"
+        return f"{base_name}-{weight}.svg"
+
+    def _icon_url_for_weight(self, icon_name: str, weight: str) -> str:
+        normalized_weight = normalize_icon_weight(weight)
+        base_name = self._base_icon_name(icon_name)
+        filename = self._icon_filename_for_weight(base_name, normalized_weight)
+        relative_path = f"static/icons/{normalized_weight}/{filename}"
+        if not os.path.isfile(get_resource_path(relative_path)):
+            normalized_weight = DEFAULT_ICON_WEIGHT
+            filename = self._icon_filename_for_weight(base_name, normalized_weight)
+
+        return absolute_fastapi_asset_url(
+            f"/static/icons/{normalized_weight}/{filename}"
+        )
+
+    async def search_icons(self, query: str, k: int = 1, weight: str | None = None):
         if not self.ensure_initialized():
             # Return empty list if vectorstore failed to initialize
             return []
             
         try:
+            icon_weight = normalize_icon_weight(weight)
             result = await asyncio.to_thread(self.vectorstore.search, query, k)
-            return [
-                f"/static/icons/bold/{each[0].split('||')[0]}.svg"
-                for each in result
-            ]
+            return [self._icon_url_for_weight(each[0], icon_weight) for each in result]
         except Exception as e:
             print(f"Icon search error: {e}")
             return []

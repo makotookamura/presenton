@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 export const Schema = z.object({
     title: z.string().describe("The main heading of the slide").default("Executive Summary"),
@@ -71,9 +72,7 @@ const dynamicSlideLayout: React.FC<{ data: Partial<z.infer<typeof Schema>> }> = 
                             >
                                 <span className="text-[15.8px] text-black mb-1" style={{ color: 'var(--primary-text,#000000)' }}>{item.label}</span>
                                 <span className="text-[36.3px] text-black mb-3" style={{ color: 'var(--primary-text,#000000)' }}>{item.value}</span>
-                                <span className="text-[12.6px] text-[#4D5463] text-center leading-tight" style={{ color: 'var(--primary-text,#4D5463)' }}>
-                                    {item.description}
-                                </span>
+                                <span className="text-[12.6px] text-[#4D5463] text-center leading-tight" style={{ color: 'var(--primary-text,#4D5463)' }} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(item.description || "") }} />
                             </div>
                         ))}
                     </div>

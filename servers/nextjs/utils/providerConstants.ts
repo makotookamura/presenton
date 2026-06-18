@@ -28,6 +28,60 @@ export interface LLMProviderOption {
   getApiKeyUrl?: string;
 }
 
+export interface WebSearchProviderOption {
+  value: string;
+  label: string;
+  description: string;
+  apiKeyField?: string;
+  apiKeyLabel?: string;
+  urlField?: string;
+  urlLabel?: string;
+}
+
+export const WEB_SEARCH_PROVIDERS: Record<string, WebSearchProviderOption> = {
+  auto: {
+    value: "auto",
+    label: "Default (Model)",
+    description:
+      "Use model-native web grounding when available. Otherwise web search stays off until you choose an external provider.",
+  },
+  searxng: {
+    value: "searxng",
+    label: "SearXNG",
+    description: "Use a self-hosted SearXNG instance.",
+    urlField: "SEARXNG_BASE_URL",
+    urlLabel: "SearXNG base URL",
+  },
+  tavily: {
+    value: "tavily",
+    label: "Tavily",
+    description: "Search API optimized for AI applications.",
+    apiKeyField: "TAVILY_API_KEY",
+    apiKeyLabel: "Tavily API key",
+  },
+  exa: {
+    value: "exa",
+    label: "Exa",
+    description: "AI-native web search with extracted result highlights.",
+    apiKeyField: "EXA_API_KEY",
+    apiKeyLabel: "Exa API key",
+  },
+  brave: {
+    value: "brave",
+    label: "Brave",
+    description: "Brave Search API for web search results.",
+    apiKeyField: "BRAVE_SEARCH_API_KEY",
+    apiKeyLabel: "Brave Search API key",
+  },
+  // serper: {
+  //   value: "serper",
+  //   label: "Serper",
+  //   description: "Google search results via Serper.",
+  //   apiKeyField: "SERPER_API_KEY",
+  //   apiKeyLabel: "Serper API key",
+  // },
+};
+
 export const IMAGE_PROVIDERS: Record<string, ImageProviderOption> = {
   pexels: {
     value: "pexels",
@@ -47,7 +101,7 @@ export const IMAGE_PROVIDERS: Record<string, ImageProviderOption> = {
     requiresApiKey: true,
     apiKeyField: "PIXABAY_API_KEY",
     apiKeyFieldLabel: "Pixabay API Key",
-    getApiKeyUrl: "https://docs.presenton.ai/help/get-api-keys/get-pixabay-api-keyhttps://www.google.com/search?q=how+to+get+openai+api+key&ie=UTF-8",
+    getApiKeyUrl: "https://docs.presenton.ai/help/get-api-keys/get-pixabay-api-key",
   },
   "dall-e-3": {
     value: "dall-e-3",
@@ -107,6 +161,16 @@ export const IMAGE_PROVIDERS: Record<string, ImageProviderOption> = {
     apiKeyField: "OPEN_WEBUI_IMAGE_URL",
     apiKeyFieldLabel: "Open WebUI URL",
   },
+  openai_compatible: {
+    value: "openai_compatible",
+    label: "Custom",
+    description:
+      "OpenAI-compatible /v1/images endpoint (LiteLLM, Azure, vLLM, etc.)",
+    icon: "/providers/custom.svg",
+    requiresApiKey: false,
+    apiKeyField: "OPENAI_COMPAT_IMAGE_BASE_URL",
+    apiKeyFieldLabel: "OpenAI-compatible base URL",
+  },
 };
 
 export const LLM_PROVIDERS: Record<string, LLMProviderOption> = {
@@ -131,6 +195,71 @@ export const LLM_PROVIDERS: Record<string, LLMProviderOption> = {
     url: "https://api.google.com/v1",
     icon: "/providers/gemini-color.svg",
     getApiKeyUrl: "https://www.google.com/search?q=how+to+get+google+AI+studio+api+key&sxsrf=ANbL-n5_hUGaEiG9v6k9VxZWyv0mqO0Jew%3A1776339625724",
+  },
+  vertex: {
+    value: "vertex",
+    label: "Vertex AI",
+    description: "Google Vertex AI models",
+    icon: "/providers/gemini-color.svg",
+    getApiKeyUrl: "https://www.google.com/search?q=how+to+get+vertex+ai+api+key",
+  },
+  azure: {
+    value: "azure",
+    label: "Azure OpenAI",
+    description: "Azure-hosted OpenAI deployments",
+    icon: "/providers/openai.png",
+    getApiKeyUrl: "https://www.google.com/search?q=azure+openai+api+key",
+  },
+  bedrock: {
+    value: "bedrock",
+    label: "Amazon Bedrock",
+    description: "AWS Bedrock foundation models",
+    icon: "/providers/custom.svg",
+  },
+  openrouter: {
+    value: "openrouter",
+    label: "OpenRouter",
+    description: "Many models through OpenRouter’s OpenAI-compatible API",
+    url: "https://openrouter.ai/api/v1",
+    icon: "/providers/openai.png",
+    getApiKeyUrl: "https://openrouter.ai/keys",
+  },
+  cerebras: {
+    value: "cerebras",
+    label: "Cerebras",
+    description: "Cerebras Cloud via OpenAI-compatible API",
+    url: "https://api.cerebras.ai/v1",
+    icon: "/providers/openai.png",
+    getApiKeyUrl: "https://inference-docs.cerebras.ai",
+  },
+  litellm: {
+    value: "litellm",
+    label: "LiteLLM",
+    description: "OpenAI-compatible LiteLLM proxy or gateway",
+    icon: "/providers/openai.png",
+  },
+  fireworks: {
+    value: "fireworks",
+    label: "Fireworks",
+    description: "Fireworks AI via OpenAI-compatible API",
+    url: "https://api.fireworks.ai/inference/v1",
+    icon: "/providers/openai.png",
+    getApiKeyUrl: "https://fireworks.ai/account/api-keys",
+  },
+  together: {
+    value: "together",
+    label: "Together AI",
+    description: "Together AI via OpenAI-compatible API",
+    url: "https://api.together.ai/v1",
+    icon: "/providers/openai.png",
+    getApiKeyUrl: "https://api.together.xyz/settings/api-keys",
+  },
+  lmstudio: {
+    value: "lmstudio",
+    label: "LM Studio",
+    description: "Local LM Studio OpenAI-compatible server",
+    url: "http://localhost:1234/v1",
+    icon: "/providers/custom.svg",
   },
   anthropic: {
     value: "anthropic",

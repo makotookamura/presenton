@@ -2,7 +2,14 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
+import threading
 from typing import Any, Dict, Mapping, Tuple
+
+from utils.runtime_limits import (
+    BoundedTextBuffer,
+    log_memory,
+)
 
 
 class LiteParseError(Exception):
@@ -12,7 +19,7 @@ class LiteParseError(Exception):
 LOGGER = logging.getLogger(__name__)
 _LOG_SNIPPET_LIMIT = 600
 _DEFAULT_DPI = 120
-_DEFAULT_NUM_WORKERS = 1
+_DEFAULT_NUM_WORKERS = max(os.cpu_count() - 2, 1)
 
 
 def _snippet(value: str, limit: int = _LOG_SNIPPET_LIMIT) -> str:
@@ -58,7 +65,7 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 class LiteParseService:
-    def __init__(self, timeout_seconds: int = 180):
+    def __init__(self, timeout_seconds: int = 600):
         self.timeout_seconds = timeout_seconds
         self.node_binary = os.getenv("LITEPARSE_NODE_BINARY", "node")
         self.dpi = _env_int("LITEPARSE_DPI", _DEFAULT_DPI, minimum=72, maximum=600)
@@ -76,9 +83,6 @@ class LiteParseService:
         """Build environment for Node subprocesses."""
         env = os.environ.copy()
 
-        # LiteParse checks ImageMagick availability with `which magick`.
-        # On macOS app launches, PATH often excludes Homebrew bins, even when
-        # IMAGEMAGICK_BINARY is configured to an absolute executable path.
         path_entries = [p for p in (env.get("PATH") or "").split(os.pathsep) if p]
         additional_entries = []
 
@@ -88,11 +92,9 @@ class LiteParseService:
             if magick_dir:
                 additional_entries.append(magick_dir)
 
-        soffice_binary = (env.get("SOFFICE_PATH") or "").strip()
-        if soffice_binary:
-            soffice_dir = os.path.dirname(soffice_binary)
-            if soffice_dir:
-                additional_entries.append(soffice_dir)
+        magick_home = (env.get("MAGICK_HOME") or "").strip()
+        if magick_home:
+            additional_entries.extend([magick_home, os.path.join(magick_home, "bin")])
 
         if os.name != "nt":
             additional_entries.extend([
@@ -122,6 +124,7 @@ class LiteParseService:
         candidates = [
             self.runner_dir,
             os.path.abspath(os.path.join(self.runner_dir, "..")),
+            os.path.abspath(os.path.join(self.runner_dir, "..", "..")),
             os.path.abspath(os.path.join(os.getcwd(), "..", "..", "document-extraction-liteparse")),
             os.path.abspath(os.path.join(os.getcwd(), "..", "..")),
             "/app/document-extraction-liteparse",
@@ -172,6 +175,17 @@ class LiteParseService:
             os.path.abspath(
                 os.path.join(
                     cwd, "..", "..", "app", "resources", "document-extraction", "liteparse_runner.mjs"
+                )
+            ),
+            os.path.abspath(
+                os.path.join(
+                    cwd,
+                    "..",
+                    "..",
+                    "electron",
+                    "resources",
+                    "document-extraction",
+                    "liteparse_runner.mjs",
                 )
             ),
         ]
@@ -227,16 +241,23 @@ class LiteParseService:
 
         return True, "ok"
 
+    @staticmethod
+    def _use_json_runner_output() -> bool:
+        """If true, expect one JSON line on stdout (legacy). Default is plain UTF-8 text (better for large PDFs)."""
+        return (os.getenv("LITEPARSE_RUNNER_OUTPUT") or "").strip().lower() == "json"
+
     def parse_to_markdown(
         self,
         file_path: str,
         ocr_enabled: bool = True,
         ocr_language: str = "eng",
+        dpi: int = None,
     ) -> str:
         result = self.parse(
             file_path=file_path,
             ocr_enabled=ocr_enabled,
             ocr_language=ocr_language,
+            dpi=dpi,
         )
         return str(result.get("text") or "")
 
@@ -245,10 +266,13 @@ class LiteParseService:
         file_path: str,
         ocr_enabled: bool = True,
         ocr_language: str = "eng",
+        dpi: int = None,
     ) -> Dict[str, Any]:
         is_ready, reason = self.check_runtime_ready()
         if not is_ready:
             raise LiteParseError(reason)
+
+        effective_dpi = dpi if dpi is not None else self.dpi
 
         command = [
             self.node_binary,
@@ -260,7 +284,7 @@ class LiteParseService:
             "--ocr-language",
             ocr_language,
             "--dpi",
-            str(self.dpi),
+            str(effective_dpi),
             "--num-workers",
             str(self.num_workers),
         ]
@@ -271,28 +295,66 @@ class LiteParseService:
         if tessdata:
             command.extend(["--tessdata-path", tessdata])
 
+        use_json = self._use_json_runner_output()
+        command.extend(["--python-bridge", "json" if use_json else "plain"])
+
         LOGGER.info(
             "[LiteParse] Parsing file=%s ocr_enabled=%s ocr_language=%s dpi=%s num_workers=%s",
             file_path,
             ocr_enabled,
             ocr_language,
-            self.dpi,
+            effective_dpi,
             self.num_workers,
         )
 
-        process = subprocess.run(
-            command,
-            cwd=self._npm_project_root,
-            capture_output=True,
-            timeout=self.timeout_seconds,
-            env=self._build_node_env(),
-            **_subprocess_text_kwargs(),
-        )
+        def run_process() -> subprocess.CompletedProcess[str]:
+            log_memory(
+                LOGGER,
+                "liteparse.spawn",
+                file=file_path,
+                use_json=use_json,
+            )
+            if not use_json:
+                process = self._run_plain_bridge_to_text(command)
+            else:
+                process = subprocess.run(
+                    command,
+                    cwd=self._npm_project_root,
+                    capture_output=True,
+                    timeout=self.timeout_seconds,
+                    env=self._build_node_env(),
+                    **_subprocess_text_kwargs(),
+                )
+            log_memory(
+                LOGGER,
+                "liteparse.exit",
+                file=file_path,
+                returncode=process.returncode,
+                use_json=use_json,
+            )
+            return process
+
+        process = run_process()
+
         LOGGER.info(
             "[LiteParse] Command finished returncode=%s command=%s",
             process.returncode,
             _command_str(command),
         )
+
+        if not use_json:
+            if process.returncode != 0:
+                err = (process.stderr or "").strip() or "LiteParse failed"
+                raise LiteParseError(
+                    f"{err}; returncode={process.returncode}; "
+                    f"stderr={_snippet(process.stderr)}; stdout={_snippet(process.stdout)}"
+                )
+            return {
+                "ok": True,
+                "text": (process.stdout or "").lstrip("\ufeff"),
+                "filePath": file_path,
+                "pageCount": 0,
+            }
 
         payload: Dict[str, Any]
         try:
@@ -347,3 +409,61 @@ class LiteParseService:
             pass
 
         raise LiteParseError("LiteParse runner returned invalid JSON output")
+
+    def _run_plain_bridge_to_text(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        stdout_path = ""
+        stderr_tail = BoundedTextBuffer()
+        try:
+            with tempfile.NamedTemporaryFile(prefix="liteparse-stdout-", delete=False) as stdout_file:
+                stdout_path = stdout_file.name
+                process = subprocess.Popen(
+                    command,
+                    cwd=self._npm_project_root,
+                    stdout=stdout_file,
+                    stderr=subprocess.PIPE,
+                    env=self._build_node_env(),
+                    **_windows_hidden_subprocess_kwargs(),
+                )
+
+                def drain_stderr() -> None:
+                    if process.stderr is None:
+                        return
+                    for chunk in iter(lambda: process.stderr.read(65536), b""):
+                        if not chunk:
+                            break
+                        stderr_tail.append(chunk)
+
+                stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
+                stderr_thread.start()
+                try:
+                    returncode = process.wait(timeout=self.timeout_seconds)
+                except subprocess.TimeoutExpired as exc:
+                    process.kill()
+                    process.wait()
+                    stderr_thread.join(timeout=5)
+                    raise LiteParseError(
+                        f"LiteParse timed out after {self.timeout_seconds} seconds"
+                    ) from exc
+                stderr_thread.join(timeout=5)
+
+            with open(stdout_path, "r", encoding="utf-8", errors="replace") as output_file:
+                stdout = output_file.read()
+
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr_tail.get(),
+            )
+        finally:
+            if stdout_path:
+                try:
+                    os.unlink(stdout_path)
+                except OSError:
+                    pass
+
+
+def _windows_hidden_subprocess_kwargs() -> dict[str, object]:
+    if os.name != "nt":
+        return {}
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}

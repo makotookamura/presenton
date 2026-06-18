@@ -1,9 +1,11 @@
+import json
 from typing import List, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from models.presentation_structure_model import PresentationStructureModel
+from utils.icon_weights import DEFAULT_ICON_WEIGHT, extract_icon_weight_from_settings
 
 
 class SlideLayoutModel(BaseModel):
@@ -16,7 +18,17 @@ class SlideLayoutModel(BaseModel):
 class PresentationLayoutModel(BaseModel):
     name: str
     ordered: bool = Field(default=False)
+    icon_weight: str = Field(default=DEFAULT_ICON_WEIGHT)
     slides: List[SlideLayoutModel]
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_icon_weight(cls, data):
+        if isinstance(data, dict):
+            normalized = dict(data)
+            normalized["icon_weight"] = extract_icon_weight_from_settings(normalized)
+            return normalized
+        return data
 
     def get_slide_layout_index(self, slide_layout_id: str) -> int:
         for index, slide in enumerate(self.slides):
@@ -31,10 +43,17 @@ class PresentationLayoutModel(BaseModel):
             slides=[index for index in range(len(self.slides))]
         )
 
-    def to_string(self) -> str:
+    def to_string(self, with_schema: bool = False) -> str:
         message = "## Presentation Layout\n\n"
         for index, slide in enumerate(self.slides):
             message += f"### Slide Layout: {index}\n"
             message += f"- Name: {slide.name or slide.json_schema.get('title')}\n"
-            message += f"- Description: {slide.description}\n\n"
+            message += f"- Description: {slide.description}\n"
+            if with_schema:
+                try:
+                    schema_text = json.dumps(slide.json_schema, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    schema_text = str(slide.json_schema)
+                message += f"- Schema: {schema_text}\n"
+            message += "\n"
         return message

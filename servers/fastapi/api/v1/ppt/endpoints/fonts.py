@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, File, UploadFile
 from pydantic import BaseModel
 from templates.preview import FontCheckResponse, check_fonts_in_pptx_handler
-from utils.asset_directory_utils import get_app_data_directory_env
+from utils.asset_directory_utils import absolute_fastapi_asset_url, get_app_data_directory_env
 
 try:
     from fontTools.ttLib import TTFont
@@ -19,7 +19,8 @@ FONTS_ROUTER = APIRouter(prefix="/fonts", tags=["fonts"])
 # Supported font file extensions
 SUPPORTED_FONT_EXTENSIONS = {
     '.ttf': 'font/ttf',
-    '.otf': 'font/otf', 
+    '.otf': 'font/otf',
+    '.ttc': 'font/ttf',
     '.woff': 'font/woff',
     '.woff2': 'font/woff2',
     '.eot': 'application/vnd.ms-fontobject'
@@ -59,16 +60,16 @@ def is_valid_font_file(file: UploadFile) -> bool:
     if file_ext not in SUPPORTED_FONT_EXTENSIONS:
         return False
     
-    # Check MIME type
+    # Check MIME type (.ttc may be sent as application/octet-stream by some browsers)
     content_type = file.content_type or ""
     valid_mime_types = [
-        "font/ttf", "font/otf", "font/woff", "font/woff2",
-        "application/font-ttf", "application/font-otf", 
+        "font/ttf", "font/otf", "font/collection", "font/woff", "font/woff2",
+        "application/font-ttf", "application/font-otf",
         "application/font-woff", "application/font-woff2",
         "application/x-font-ttf", "application/x-font-otf",
-        "font/truetype", "font/opentype"
+        "font/truetype", "font/opentype", "application/octet-stream",
     ]
-    
+
     return content_type in valid_mime_types
 
 
@@ -86,34 +87,32 @@ def extract_font_name_from_file(file_path: str) -> str:
         return base_name
     
     try:
-        font = TTFont(file_path)
-        
-        # Try to get font family name from name table
-        if 'name' in font:
-            name_table = font['name']
-            
-            # Preferred order: Family name (ID 1), then Full name (ID 4), then PostScript name (ID 6)
-            for name_id in [1, 4, 6]:
+        is_ttc = file_path.lower().endswith(".ttc")
+        num_fonts = TTFont(file_path).reader.numFonts if is_ttc else 1
+        font_indices: list[int | None] = list(range(num_fonts)) if is_ttc else [None]
+
+        for idx in font_indices:
+            font = TTFont(file_path, fontNumber=idx) if idx is not None else TTFont(file_path)
+
+            if 'name' in font:
+                name_table = font['name']
+                for name_id in [1, 4, 6]:
+                    for record in name_table.names:
+                        if record.nameID == name_id:
+                            if record.langID in (0x409, 0):
+                                font_name = record.toUnicode().strip()
+                                if font_name:
+                                    font.close()
+                                    return font_name
                 for record in name_table.names:
-                    if record.nameID == name_id:
-                        # Prefer English names
-                        if record.langID == 0x409 or record.langID == 0:  # English
-                            font_name = record.toUnicode().strip()
-                            if font_name:
-                                font.close()
-                                return font_name
-            
-            # If no English name found, use any available family name
-            for record in name_table.names:
-                if record.nameID == 1:  # Family name
-                    font_name = record.toUnicode().strip()
-                    if font_name:
-                        font.close()
-                        return font_name
-        
-        font.close()
+                    if record.nameID == 1:
+                        font_name = record.toUnicode().strip()
+                        if font_name:
+                            font.close()
+                            return font_name
+
+            font.close()
     except Exception as e:
-        # If font parsing fails, fallback to filename
         print(f"Error reading font metadata from {file_path}: {e}")
     
     # Fallback to filename parsing
@@ -161,18 +160,58 @@ async def upload_font(
         file_ext = os.path.splitext(font_file.filename)[1].lower()
         base_name = os.path.splitext(font_file.filename)[0]
         unique_filename = f"{base_name}_{str(uuid.uuid4())[:8]}{file_ext}"
-        
+
         # Get fonts directory
         fonts_dir = get_fonts_directory()
         font_path = os.path.join(fonts_dir, unique_filename)
-        
+
         # Save the uploaded file
         with open(font_path, "wb") as buffer:
             shutil.copyfileobj(font_file.file, buffer)
-        
+
+        # For .ttc files, extract sub-fonts to .ttf so browsers can load them
+        if file_ext == ".ttc" and FONTTOOLS_AVAILABLE:
+            try:
+                num_fonts = TTFont(font_path).reader.numFonts
+                first_name = base_name
+                first_url = absolute_fastapi_asset_url(f"/app_data/fonts/{unique_filename}")
+                first_path = font_path
+                for idx in range(num_fonts):
+                    font = TTFont(font_path, fontNumber=idx)
+                    family_name = base_name
+                    if "name" in font:
+                        for record in font["name"].names:
+                            if record.nameID == 1 and record.langID in (0x409, 0):
+                                family_name = record.toUnicode().strip()
+                                break
+                        if family_name == base_name:
+                            for record in font["name"].names:
+                                if record.nameID == 1:
+                                    family_name = record.toUnicode().strip()
+                                    break
+                    import re as _re
+                    safe = _re.sub(r"[^\w\-]", "_", family_name)
+                    ttf_filename = f"{safe}_{uuid.uuid4().hex[:6]}.ttf"
+                    ttf_path = os.path.join(fonts_dir, ttf_filename)
+                    font.save(ttf_path)
+                    font.close()
+                    if idx == 0:
+                        first_name = family_name
+                        first_url = absolute_fastapi_asset_url(f"/app_data/fonts/{ttf_filename}")
+                        first_path = ttf_path
+                return FontUploadResponse(
+                    success=True,
+                    font_name=first_name,
+                    font_url=first_url,
+                    font_path=first_path,
+                    message=f"Font collection '{base_name}' extracted and uploaded successfully"
+                )
+            except Exception as e:
+                print(f"TTC extraction failed, falling back to raw upload: {e}")
+
         # Generate accessible URL
-        font_url = f"/app_data/fonts/{unique_filename}"
-        
+        font_url = absolute_fastapi_asset_url(f"/app_data/fonts/{unique_filename}")
+
         return FontUploadResponse(
             success=True,
             font_name=base_name,
@@ -228,7 +267,7 @@ async def list_fonts():
                             "filename": filename,
                             "font_name": font_name,  # Real font family name from metadata
                             "original_name": base_name,
-                            "font_url": f"/app_data/fonts/{filename}",
+                            "font_url": absolute_fastapi_asset_url(f"/app_data/fonts/{filename}"),
                             "font_type": SUPPORTED_FONT_EXTENSIONS.get(file_ext, 'unknown'),
                             "file_size": os.path.getsize(file_path)
                         })
@@ -272,7 +311,7 @@ async def get_uploaded_fonts():
                     {
                         "id": filename,
                         "name": font_name,
-                        "url": f"/app_data/fonts/{filename}",
+                        "url": absolute_fastapi_asset_url(f"/app_data/fonts/{filename}"),
                     }
                 )
 

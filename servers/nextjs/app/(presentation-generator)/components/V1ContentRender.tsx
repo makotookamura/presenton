@@ -46,7 +46,7 @@ export const V1ContentRender = ({ slide, isEditMode, theme }: { slide: any, isEd
             }
             return null;
         } else {
-            const template = getLayoutByLayoutId(slide.layout);
+            const template = getLayoutByLayoutId(slide.layout, slide.layout_group);
             return template?.component ?? null;
         }
     }, [isCustomTemplate, customTemplate, slide.layout]);
@@ -127,11 +127,22 @@ export const V1ContentRender = ({ slide, isEditMode, theme }: { slide: any, isEd
         );
     }
     return (
-        <LayoutComp data={{
-            ...slide.content,
-            _logo_url__: theme ? theme.logo_url : null,
-            __companyName__: (theme && theme.company_name) ? theme.company_name : null,
-        }} />
-    )
+        <SlideErrorBoundary label={`Slide ${slide.index + 1}`}>
+            <div ref={containerRef}>
+                <TiptapTextReplacer
+                    key={slide.id}
+                    slideData={slide.content}
+                    slideIndex={slide.index}
+                    readOnly
+                >
+                    <LayoutComp data={{
+                        ...slide.content,
+                        _logo_url__: theme ? theme.logo_url : null,
+                        __companyName__: (theme && theme.company_name) ? theme.company_name : null,
+                    }} />
+                </TiptapTextReplacer>
+            </div>
+        </SlideErrorBoundary>
+    );
 };
 

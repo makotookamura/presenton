@@ -1,20 +1,9 @@
+"use client";
+
 import React from "react";
 import * as z from "zod";
-import {
-  BarChart,
-  Bar,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
+import { ModernSimpleChart } from "./ModernChartPrimitives";
+import { inlineMarkdownToHtml } from "@/utils/inlineMarkdown";
 
 export const layoutId = "chart-or-table-with-description";
 export const layoutName = "Chart or Table With Description";
@@ -114,12 +103,6 @@ const businessModelSchema = z
     },
   });
 
-
-const CHART_COLORS = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-  '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1'
-];
-
 export const Schema = businessModelSchema;
 export type BusinessModelData = z.infer<typeof businessModelSchema>;
 
@@ -138,11 +121,6 @@ const BusinessModelSlide: React.FC<Props> = ({ data }) => {
   const type = data?.chart?.type || "bar";
 
   const showLabels = data?.chart?.showLabels !== false;
-  const axisProps = {
-    tick: { fill: 'var(--background-text, #7f8491)', fontSize: 12, fontWeight: 600 },
-    axisLine: { stroke: 'var(--background-text, #7f8491)' },
-    tickLine: { stroke: 'var(--background-text, #7f8491)' },
-  };
 
   return (
     <>
@@ -193,9 +171,9 @@ const BusinessModelSlide: React.FC<Props> = ({ data }) => {
                     <thead>
                       <tr>
                         {columns.map((col, idx) => (
-                          <th key={idx} className="text-left text-sm font-semibold px-4 py-3 border-b" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.12))', color: 'var(--primary-color, #1E4CD9)' }}>
-                            {col}
-                          </th>
+                          <th key={idx} className="text-left text-sm font-semibold px-4 py-3 border-b" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.12))', color: 'var(--primary-color, #1E4CD9)' }}
+                            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(col) }}
+                          ></th>
                         ))}
                       </tr>
                     </thead>
@@ -203,9 +181,9 @@ const BusinessModelSlide: React.FC<Props> = ({ data }) => {
                       {rows.map((row, rIdx) => (
                         <tr key={rIdx} className="align-top">
                           {columns.map((_, cIdx) => (
-                            <td key={cIdx} className="text-sm px-4 py-3 border-t" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.08))', color: 'var(--background-text, #334155)' }}>
-                              {row.cells[cIdx] || ''}
-                            </td>
+                            <td key={cIdx} className="text-sm px-4 py-3 border-t" style={{ borderColor: 'var(--stroke, rgba(0,0,0,0.08))', color: 'var(--background-text, #334155)' }}
+                              dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(row.cells[cIdx] || '') }}
+                            ></td>
                           ))}
                         </tr>
                       ))}
@@ -219,58 +197,7 @@ const BusinessModelSlide: React.FC<Props> = ({ data }) => {
                   style={{ backgroundColor: 'var(--card-color, #F5F8FE)' }}
                 >
                   <div className="w-full h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                      {type === "bar" ? (
-                        <BarChart data={cData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }} barCategoryGap="30%">
-                          <CartesianGrid strokeDasharray="3 3" stroke={`var(--background-text, #E5E7EB)`} />
-                          <XAxis dataKey="label" {...axisProps} />
-                          <YAxis {...axisProps} />
-                          <Tooltip />
-                          <Legend />
-                          <Bar dataKey="value" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]} label={showLabels ? { position: 'top', fill: 'var(--background-text, #111827)', fontSize: 12 } : false} >
-                            {cData.map((_, i) => (
-                              <Cell key={i} fill={`var(--graph-${i}, ${CHART_COLORS[i % CHART_COLORS.length]})`} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      ) : type === "horizontalBar" ? (
-                        <BarChart data={cData} layout="vertical" margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke={`var(--background-text, #E5E7EB)`} />
-                          <XAxis type="number" {...axisProps} />
-                          <YAxis type="category" dataKey="label" {...axisProps} />
-                          <Tooltip />
-                          <Legend />
-                          <Bar dataKey="value" fill={CHART_COLORS[0]} radius={[0, 6, 6, 0]} label={showLabels ? { position: 'right', fill: 'var(--background-text, #111827)', fontSize: 12 } : false} >
-                            {cData.map((_, i) => (
-                              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      ) : type === "line" ? (
-                        <LineChart data={cData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke={`var(--background-text, #E5E7EB)`} />
-                          <XAxis dataKey="label" {...axisProps} />
-                          <YAxis {...axisProps} />
-                          <Tooltip />
-                          <Legend />
-                          <Line type="monotone" dataKey="value" strokeWidth={3} dot={{ r: 4, color: CHART_COLORS[0] }} label={showLabels ? { position: 'top', fill: 'var(--background-text, #111827)', fontSize: 12 } : false} >
-                            {cData.map((_, i) => (
-                              <Cell key={i} fill={`var(--graph-${i}, ${CHART_COLORS[i % CHART_COLORS.length]})`} />
-                            ))}
-                          </Line>
-                        </LineChart>
-                      ) : (
-                        <PieChart >
-                          <Tooltip />
-                          <Legend />
-                          <Pie data={cData} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={100} label={showLabels}>
-                            {cData.map((_, i) => (
-                              <Cell key={i} fill={`var(--graph-${i}, ${CHART_COLORS[i % CHART_COLORS.length]})`} />
-                            ))}
-                          </Pie>
-                        </PieChart>
-                      )}
-                    </ResponsiveContainer>
+                    <ModernSimpleChart type={type} data={cData} showLabels={showLabels} />
                   </div>
                 </div>
               </div>

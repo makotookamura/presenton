@@ -8,16 +8,21 @@ import { cn } from '@/lib/utils';
 import { LLMConfig } from '@/types/llm_config';
 import { RootState } from '@/store/store';
 import { useSelector } from 'react-redux';
-import { toast } from 'sonner';
+import { notify } from '@/components/ui/sonner';
 import ToolTip from '../ToolTip';
 import { Switch } from '../ui/switch';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '../ui/select';
 import { MixpanelEvent, trackEvent } from '@/utils/mixpanel';
 import { usePathname } from 'next/navigation';
-import { handleSaveLLMConfig } from '@/utils/storeHelpers';
+import { getLLMConfigValidationError, handleSaveLLMConfig } from '@/utils/storeHelpers';
 import { checkIfSelectedOllamaModelIsPulled, pullOllamaModel } from '@/utils/providerUtils';
 import { getApiUrl } from '@/utils/api';
 import CodexConfig, { CHATGPT_MODELS } from '../CodexConfig';
+import VertexAzureManualFields from '@/components/VertexAzureManualFields';
+import BedrockManualFields from '@/components/BedrockManualFields';
+import OpenAICompatibleImageFields from '@/components/OpenAICompatibleImageFields';
+
+const MANUAL_MODEL_PROVIDERS = new Set(["vertex", "azure", "bedrock"]);
 
 const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep: (step: number) => void }) => {
     const pathname = usePathname();
@@ -42,6 +47,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
         status: string;
         done: boolean;
     } | null>(null);
+    const isManualModelProvider = MANUAL_MODEL_PROVIDERS.has(llmConfig.LLM || "");
 
     const handleProviderChange = (provider: string) => {
         setLlmConfig(prev => ({
@@ -65,12 +71,30 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 return 'OPENAI_MODEL';
             case 'google':
                 return 'GOOGLE_MODEL';
+            case 'vertex':
+                return 'VERTEX_MODEL';
+            case 'azure':
+                return 'AZURE_OPENAI_MODEL';
+            case 'bedrock':
+                return 'BEDROCK_MODEL';
+            case 'openrouter':
+                return 'OPENROUTER_MODEL';
+            case 'fireworks':
+                return 'FIREWORKS_MODEL';
+            case 'together':
+                return 'TOGETHER_MODEL';
+            case 'cerebras':
+                return 'CEREBRAS_MODEL';
             case 'anthropic':
                 return 'ANTHROPIC_MODEL';
             case 'ollama':
                 return 'OLLAMA_MODEL';
             case 'custom':
                 return 'CUSTOM_MODEL';
+            case 'litellm':
+                return 'LITELLM_MODEL';
+            case 'lmstudio':
+                return 'LMSTUDIO_MODEL';
             default:
                 return '';
         }
@@ -81,10 +105,28 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 return 'OPENAI_API_KEY';
             case 'google':
                 return 'GOOGLE_API_KEY';
+            case 'vertex':
+                return 'VERTEX_API_KEY';
+            case 'azure':
+                return 'AZURE_OPENAI_API_KEY';
+            case 'bedrock':
+                return 'BEDROCK_API_KEY';
+            case 'openrouter':
+                return 'OPENROUTER_API_KEY';
+            case 'fireworks':
+                return 'FIREWORKS_API_KEY';
+            case 'together':
+                return 'TOGETHER_API_KEY';
+            case 'cerebras':
+                return 'CEREBRAS_API_KEY';
             case 'anthropic':
                 return 'ANTHROPIC_API_KEY';
             case 'custom':
                 return 'CUSTOM_LLM_API_KEY';
+            case 'litellm':
+                return 'LITELLM_API_KEY';
+            case 'lmstudio':
+                return 'LMSTUDIO_API_KEY';
             default:
                 return '';
         }
@@ -99,8 +141,34 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
 
     const currentApiKey = currentApiKeyField ? ((llmConfig as Record<string, unknown>)[currentApiKeyField] as string || '') : '';
     const currentModel = currentModelField ? ((llmConfig as Record<string, unknown>)[currentModelField] as string || '') : '';
+    const currentLitellmUrl = (llmConfig.LITELLM_BASE_URL || '').trim();
+    const currentLmStudioUrl = (llmConfig.LMSTUDIO_BASE_URL || '').trim();
+    const currentFireworksUrl = (llmConfig.FIREWORKS_BASE_URL || '').trim();
+    const currentTogetherUrl = (llmConfig.TOGETHER_BASE_URL || '').trim();
     const currentOllamaUrl = llmConfig.OLLAMA_URL || '';
     const useCustomOllamaUrl = !!llmConfig.USE_CUSTOM_URL;
+    const providerApiKeyLabel =
+        llmConfig.LLM === 'custom'
+            ? 'Custom LLM API Key'
+            : llmConfig.LLM === 'vertex'
+                ? 'Vertex API Key'
+                : llmConfig.LLM === 'azure'
+                    ? 'Azure OpenAI API Key'
+                    : llmConfig.LLM === 'bedrock'
+                        ? 'Bedrock API Key (optional)'
+                    : llmConfig.LLM === 'openrouter'
+                        ? 'OpenRouter API Key'
+                        : llmConfig.LLM === 'fireworks'
+                            ? 'Fireworks API Key'
+                            : llmConfig.LLM === 'together'
+                                ? 'Together API Key'
+                        : llmConfig.LLM === 'cerebras'
+                            ? 'Cerebras API Key'
+                            : llmConfig.LLM === 'litellm'
+                                ? 'LiteLLM API key (optional)'
+                                : llmConfig.LLM === 'lmstudio'
+                                    ? 'LM Studio API key (optional)'
+                                : `${llmConfig.LLM} API Key`;
 
     const getSelectedTextModel = (config: LLMConfig): string => {
         switch (config.LLM) {
@@ -108,13 +176,32 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 return config.OPENAI_MODEL || '';
             case 'google':
                 return config.GOOGLE_MODEL || '';
+            case 'vertex':
+                return config.VERTEX_MODEL || '';
+            case 'azure':
+                return config.AZURE_OPENAI_MODEL || '';
+            case 'bedrock':
+                return config.BEDROCK_MODEL || '';
+            case 'openrouter':
+                return config.OPENROUTER_MODEL || '';
+            case 'fireworks':
+                return config.FIREWORKS_MODEL || '';
+            case 'together':
+                return config.TOGETHER_MODEL || '';
+            case 'cerebras':
+                return config.CEREBRAS_MODEL || '';
             case 'anthropic':
                 return config.ANTHROPIC_MODEL || '';
             case 'ollama':
                 return config.OLLAMA_MODEL || '';
             case 'custom':
                 return config.CUSTOM_MODEL || '';
+            case 'litellm':
+                return config.LITELLM_MODEL || '';
+            case 'lmstudio':
+                return config.LMSTUDIO_MODEL || '';
             case 'chatgpt':
+            case 'codex':
                 return config.CODEX_MODEL || '';
             default:
                 return '';
@@ -128,10 +215,16 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
     };
 
     const fetchAvailableModels = async () => {
+        if (isManualModelProvider) return;
         if (llmConfig.LLM === 'openai' && !currentApiKey) return;
         if (llmConfig.LLM === 'google' && !currentApiKey) return;
         if (llmConfig.LLM === 'anthropic' && !currentApiKey) return;
+        if (llmConfig.LLM === 'openrouter' && !currentApiKey) return;
+        if (llmConfig.LLM === 'fireworks' && !currentApiKey) return;
+        if (llmConfig.LLM === 'together' && !currentApiKey) return;
+        if (llmConfig.LLM === 'cerebras' && !currentApiKey) return;
         if (llmConfig.LLM === 'custom' && !llmConfig.CUSTOM_LLM_URL) return;
+        if (llmConfig.LLM === 'litellm' && !currentLitellmUrl) return;
         setModelsLoading(true);
         try {
             let response: Response;
@@ -158,13 +251,25 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
             } else if (llmConfig.LLM === 'ollama') {
                 response = await fetch(getApiUrl('/api/v1/ppt/ollama/models/supported'));
             } else {
+                const openAiCompatibleUrl =
+                    llmConfig.LLM === 'custom'
+                        ? llmConfig.CUSTOM_LLM_URL
+                        : llmConfig.LLM === 'litellm'
+                            ? currentLitellmUrl
+                            : llmConfig.LLM === 'lmstudio'
+                                ? currentLmStudioUrl || LLM_PROVIDERS[llmConfig.LLM!]?.url || ''
+                            : llmConfig.LLM === 'fireworks'
+                                ? currentFireworksUrl || LLM_PROVIDERS[llmConfig.LLM!]?.url || ''
+                                : llmConfig.LLM === 'together'
+                                    ? currentTogetherUrl || LLM_PROVIDERS[llmConfig.LLM!]?.url || ''
+                            : LLM_PROVIDERS[llmConfig.LLM!]?.url || '';
                 response = await fetch(getApiUrl('/api/v1/ppt/openai/models/available'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        url: llmConfig.LLM === 'custom' ? llmConfig.CUSTOM_LLM_URL : LLM_PROVIDERS[llmConfig.LLM!]?.url || '',
+                        url: openAiCompatibleUrl,
                         api_key: currentApiKey
                     }),
                 });
@@ -199,7 +304,19 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                 ? 'models/gemini-2.5-flash'
                                 : llmConfig.LLM === 'anthropic'
                                     ? 'claude-sonnet-4-20250514'
-                                    : normalizedModels[0];
+                                    : llmConfig.LLM === 'openrouter'
+                                        ? 'openai/gpt-4o'
+                                        : llmConfig.LLM === 'fireworks'
+                                            ? 'accounts/fireworks/models/llama-v3p1-8b-instruct'
+                                            : llmConfig.LLM === 'together'
+                                                ? 'openai/gpt-oss-20b'
+                                        : llmConfig.LLM === 'cerebras'
+                                            ? 'llama-3.3-70b'
+                                            : llmConfig.LLM === 'litellm'
+                                                ? 'gpt-4.1'
+                                            : llmConfig.LLM === 'lmstudio'
+                                                ? 'openai/gpt-oss-20b'
+                                                : normalizedModels[0];
 
                     const nextModel = normalizedModels.includes(preferredDefault) ? preferredDefault : normalizedModels[0];
                     setLlmConfig(prev => ({
@@ -211,11 +328,11 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 console.error('Failed to fetch models');
                 setAvailableModels([]);
                 setModelsChecked(true);
-                toast.error(`Failed to fetch ${LLM_PROVIDERS[llmConfig.LLM!]?.label} models`);
+                notify.error("Could not load models", `The server could not list ${LLM_PROVIDERS[llmConfig.LLM!]?.label} models. Check your API key or endpoint and try again.`);
             }
         } catch (error) {
             console.error('Error fetching models:', error);
-            toast.error('Error fetching models');
+            notify.error("Could not load models", "The server could not list models. Check your API key or endpoint and try again.");
             setAvailableModels([]);
             setModelsChecked(true);
         } finally {
@@ -313,9 +430,14 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
             if (llmConfig.LLM === 'codex') {
                 const isAuthenticated = await checkCurrentAuthStatus();
                 if (!isAuthenticated) {
-                    toast.error("Please sign in to ChatGPT to continue");
+                    notify.error("Sign in required", "Please sign in to ChatGPT to continue.");
                     return;
                 }
+            }
+            const validationError = getLLMConfigValidationError(llmConfig);
+            if (validationError) {
+                notify.warning("Cannot save yet", validationError);
+                return;
             }
             setSavingConfig(true);
 
@@ -348,11 +470,11 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                 image_quality: imageGenerationEnabled ? getSelectedImageQuality(llmConfig) : ''
             });
 
-            toast.info("Configuration saved successfully");
+            notify.success("Configuration saved", "Your configuration was saved successfully.");
             setStep(3)
             // router.push("/upload");
         } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Failed to save configuration");
+            notify.error("Could not save configuration", error instanceof Error ? error.message : "Failed to save configuration");
 
         }
         finally {
@@ -421,8 +543,8 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                     <p className='text-xs font-normal text-[#999999]'>OR</p>
                     <div className='w-full h-[1px] bg-[#E1E1E5]' />
                 </div>
-                <div className='flex flex-col items-start gap-4 '>
-                    <div className="flex flex-col justify-start w-full ">
+                <div className="flex w-full max-w-[222px] flex-col items-start gap-4">
+                    <div className="flex w-full flex-col justify-start">
 
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             Select Text Provider
@@ -436,7 +558,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                     variant="outline"
                                     role="combobox"
                                     aria-expanded={openProviderSelect}
-                                    className=" h-12 px-4 py-4 outline-none border border-[#E8E8E9] rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors hover:border-gray-400 justify-between"
+                                    className="flex h-12 w-full px-4 py-4 outline-none border border-[#E8E8E9] rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors hover:border-gray-400 justify-between"
                                 >
                                     <div className="flex gap-3 items-center">
                                         <span className="text-sm font-medium text-gray-900">
@@ -495,7 +617,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                             </PopoverContent>
                         </Popover>
                     </div>
-                    <div className="relative flex flex-col justify-end  items-end  w-full ">
+                    <div className="relative flex w-full flex-col justify-end items-start">
                         <div className="flex flex-col justify-start w-full ">
                             {llmConfig.LLM === 'ollama' ? (
                                 <>
@@ -602,12 +724,19 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                         </PopoverContent>
                                     </Popover>
                                 </div>
+                            ) : llmConfig.LLM === 'bedrock' ? (
+                                <BedrockManualFields
+                                    llmConfig={llmConfig}
+                                    onPatch={(patch) => {
+                                        setLlmConfig((prev) => ({ ...prev, ...patch }));
+                                    }}
+                                />
                             ) : (
                                 <>
                                     <div className='flex items-center justify-between mb-2'>
 
                                         <label className="block text-sm font-medium capitalize text-gray-700 ">
-                                            {llmConfig.LLM === 'custom' ? 'Custom LLM API Key' : `${llmConfig.LLM} API Key`}
+                                            {providerApiKeyLabel}
                                         </label>
                                         {llmConfig.LLM && LLM_PROVIDERS[llmConfig.LLM!]?.getApiKeyUrl && <a href={LLM_PROVIDERS[llmConfig.LLM!]?.getApiKeyUrl || ""} target='_blank' className='text-[#666666] text-xs font-normal flex items-center gap-1'>Get API Key <ArrowUpRight className='w-3.5 h-3.5' /></a>}
                                     </div>
@@ -621,7 +750,7 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                                 [currentApiKeyField]: e.target.value
                                             }))}
                                             className="w-full px-2 py-3 outline-none border  border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-                                            placeholder={`Enter your ${llmConfig.LLM} API key`}
+                                            placeholder={`Enter your ${providerApiKeyLabel}`}
                                         />
                                         <button
                                             type="button"
@@ -645,12 +774,94 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                     placeholder="OpenAI-compatible URL"
                                 />
                             )}
-
-
+                            {llmConfig.LLM === 'litellm' && (
+                                <>
+                                    <label className="mt-3 block text-sm font-medium text-gray-700 mb-2">
+                                        LiteLLM base URL
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={llmConfig.LITELLM_BASE_URL || ''}
+                                        onChange={(e) => setLlmConfig(prev => ({
+                                            ...prev,
+                                            LITELLM_BASE_URL: e.target.value
+                                        }))}
+                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                                        placeholder="e.g. http://host.docker.internal:4000/v1"
+                                    />
+                                    <p className="mt-1.5 text-xs text-gray-500">
+                                        OpenAI-compatible root (usually ends with /v1); /v1 is added if omitted. API key above is optional for local proxies with no auth.
+                                    </p>
+                                </>
+                            )}
+                            {llmConfig.LLM === 'lmstudio' && (
+                                <>
+                                    <label className="mt-3 block text-sm font-medium text-gray-700 mb-2">
+                                        LM Studio base URL
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={llmConfig.LMSTUDIO_BASE_URL || ''}
+                                        onChange={(e) => setLlmConfig(prev => ({
+                                            ...prev,
+                                            LMSTUDIO_BASE_URL: e.target.value
+                                        }))}
+                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                                        placeholder="http://localhost:1234/v1"
+                                    />
+                                    <p className="mt-1.5 text-xs text-gray-500">
+                                        Defaults to localhost:1234/v1, and /v1 is added automatically when omitted.
+                                    </p>
+                                </>
+                            )}
+                            {llmConfig.LLM === 'fireworks' && (
+                                <>
+                                    <label className="mt-3 block text-sm font-medium text-gray-700 mb-2">
+                                        Fireworks base URL (optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={llmConfig.FIREWORKS_BASE_URL || ''}
+                                        onChange={(e) => setLlmConfig(prev => ({
+                                            ...prev,
+                                            FIREWORKS_BASE_URL: e.target.value
+                                        }))}
+                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                                        placeholder="https://api.fireworks.ai/inference/v1"
+                                    />
+                                </>
+                            )}
+                            {llmConfig.LLM === 'together' && (
+                                <>
+                                    <label className="mt-3 block text-sm font-medium text-gray-700 mb-2">
+                                        Together base URL (optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={llmConfig.TOGETHER_BASE_URL || ''}
+                                        onChange={(e) => setLlmConfig(prev => ({
+                                            ...prev,
+                                            TOGETHER_BASE_URL: e.target.value
+                                        }))}
+                                        className="w-full px-2 py-3 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                                        placeholder="https://api.together.ai/v1"
+                                    />
+                                </>
+                            )}
+                            {(llmConfig.LLM === 'vertex' || llmConfig.LLM === 'azure') && (
+                                <VertexAzureManualFields
+                                    key={llmConfig.LLM}
+                                    provider={llmConfig.LLM === 'vertex' ? 'vertex' : 'azure'}
+                                    llmConfig={llmConfig}
+                                    onPatch={(patch) => {
+                                        setLlmConfig((prev) => ({ ...prev, ...patch }));
+                                    }}
+                                />
+                            )}
                         </div>
 
 
-                        {llmConfig.LLM !== 'ollama' && llmConfig.LLM !== 'chatgpt' && llmConfig.LLM !== 'codex' && (!modelsChecked || (modelsChecked && availableModels.length === 0)) && (
+                        {!isManualModelProvider && llmConfig.LLM !== 'ollama' && llmConfig.LLM !== 'chatgpt' && llmConfig.LLM !== 'codex' && (!modelsChecked || (modelsChecked && availableModels.length === 0)) && (
 
                             <button
                                 onClick={fetchAvailableModels}
@@ -659,7 +870,12 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                                     (llmConfig.LLM === 'openai' && !currentApiKey) ||
                                     (llmConfig.LLM === 'google' && !currentApiKey) ||
                                     (llmConfig.LLM === 'anthropic' && !currentApiKey) ||
-                                    (llmConfig.LLM === 'custom' && !llmConfig.CUSTOM_LLM_URL)
+                                    (llmConfig.LLM === 'openrouter' && !currentApiKey) ||
+                                    (llmConfig.LLM === 'fireworks' && !currentApiKey) ||
+                                    (llmConfig.LLM === 'together' && !currentApiKey) ||
+                                    (llmConfig.LLM === 'cerebras' && !currentApiKey) ||
+                                    (llmConfig.LLM === 'custom' && !llmConfig.CUSTOM_LLM_URL) ||
+                                    (llmConfig.LLM === 'litellm' && !currentLitellmUrl)
                                 }
                                 className={`mt-4 py-2.5 bg-[#EDEEEF] disabled:opacity-50 disabled:cursor-not-allowed px-3.5 w-full  rounded-[48px] text-xs font-semibold text-[#101323] transition-all duration-200 border ${modelsLoading
                                     ? " border-gray-300 cursor-not-allowed text-gray-500"
@@ -679,11 +895,11 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                     </div>
 
                 </div>
-                <div className='flex items-start gap-4 mt-4'>
+                <div className="mt-4 flex w-full max-w-[222px] items-start gap-4">
 
 
                     {/* Model Selection - only show if models are available */}
-                    {llmConfig.LLM !== 'chatgpt' && llmConfig.LLM !== 'codex' && modelsChecked && availableModels.length > 0 && (
+                    {!isManualModelProvider && llmConfig.LLM !== 'chatgpt' && llmConfig.LLM !== 'codex' && modelsChecked && availableModels.length > 0 && (
                         <div className="w-full">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -889,7 +1105,34 @@ const PresentonMode = ({ currentStep, setStep }: { currentStep: number, setStep:
                             (() => {
                                 const provider = IMAGE_PROVIDERS[llmConfig.IMAGE_PROVIDER];
 
-
+                                if (provider.value === "openai_compatible") {
+                                    return (
+                                        <OpenAICompatibleImageFields
+                                            layout="stacked"
+                                            baseUrl={llmConfig.OPENAI_COMPAT_IMAGE_BASE_URL || ""}
+                                            apiKey={llmConfig.OPENAI_COMPAT_IMAGE_API_KEY || ""}
+                                            model={llmConfig.OPENAI_COMPAT_IMAGE_MODEL || ""}
+                                            onBaseUrlChange={(v) =>
+                                                setLlmConfig((prev) => ({
+                                                    ...prev,
+                                                    OPENAI_COMPAT_IMAGE_BASE_URL: v,
+                                                }))
+                                            }
+                                            onApiKeyChange={(v) =>
+                                                setLlmConfig((prev) => ({
+                                                    ...prev,
+                                                    OPENAI_COMPAT_IMAGE_API_KEY: v,
+                                                }))
+                                            }
+                                            onModelChange={(v) =>
+                                                setLlmConfig((prev) => ({
+                                                    ...prev,
+                                                    OPENAI_COMPAT_IMAGE_MODEL: v,
+                                                }))
+                                            }
+                                        />
+                                    );
+                                }
 
                                 // Show ComfyUI configuration
                                 if (provider.value === "comfyui") {

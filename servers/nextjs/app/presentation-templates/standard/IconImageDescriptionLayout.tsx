@@ -129,7 +129,7 @@ const dynamicSlideLayout: React.FC<SlideLayoutProps> = ({ data: slideData }) => 
         </div>
 
         <div className="px-10 pt-5 pb-6">
-          <h1 className="text-[64px] leading-[1.05] text-center font-semibold" style={{ fontFamily: "Playfair Display", color: 'var(--background-text, #111827)' }}>
+          <h1 className="text-[64px] leading-[1.05] text-center font-semibold" style={{ fontFamily: 'var(--heading-font-family, "Noto Sans JP", sans-serif)', color: 'var(--background-text, #111827)' }}>
             {(slideData?.title || "").split("\n").map((line, idx) => (
               <span key={idx}>
                 {line}
@@ -163,10 +163,10 @@ const dynamicSlideLayout: React.FC<SlideLayoutProps> = ({ data: slideData }) => 
               </div>
 
               <div className="min-w-0">
-                <div className="text-white text-[28px] leading-[34px] font-semibold" style={{ fontFamily: "Playfair Display", color: 'var(--primary-text, #FFFFFF)' }}>
+                <div className="text-white text-[28px] leading-[34px] font-semibold" style={{ fontFamily: 'var(--heading-font-family, "Noto Sans JP", sans-serif)', color: 'var(--primary-text, #FFFFFF)' }}>
                   {slideData?.card?.heading}
                 </div>
-                <p className="mt-3 text-white/95 text-[16px] leading-[28px]" style={{ fontFamily: "Playfair Display", color: 'var(--primary-text, #FFFFFF)' }}>
+                <p className="mt-3 text-white/95 text-[16px] leading-[28px]" style={{ fontFamily: 'var(--heading-font-family, "Noto Sans JP", sans-serif)', color: 'var(--primary-text, #FFFFFF)' }}>
                   {slideData?.card?.body}
                 </p>
 

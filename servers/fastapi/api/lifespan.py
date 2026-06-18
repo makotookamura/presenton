@@ -6,10 +6,11 @@ from fastapi import FastAPI
 
 from migrations import migrate_database_on_startup
 from services.database import create_db_and_tables, dispose_engines
-from utils.get_env import get_app_data_directory_env
+from utils.get_env import get_app_data_directory_env, get_can_change_keys_env
 from utils.model_availability import (
     check_llm_and_image_provider_api_or_model_availability,
 )
+from utils.user_config import update_env_with_user_config
 from utils.simple_auth import (
     clear_stored_credentials,
     force_set_credentials,
@@ -18,6 +19,13 @@ from utils.simple_auth import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_application_logging() -> None:
+    """Honor LOG_LEVEL (default INFO) so template/export diagnostics are visible."""
+    raw = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
+    level = getattr(logging, raw, logging.INFO)
+    logging.getLogger().setLevel(level)
 
 
 def _is_truthy(value: str | None) -> bool:
@@ -82,10 +90,13 @@ async def app_lifespan(_: FastAPI):
     the single-user login from env vars (if provided), and checks LLM model
     availability.
     """
+    _configure_application_logging()
     os.makedirs(get_app_data_directory_env(), exist_ok=True)
     await migrate_database_on_startup()
     await create_db_and_tables()
     _bootstrap_auth_from_env()
+    if get_can_change_keys_env() != "false":
+        update_env_with_user_config()
     await check_llm_and_image_provider_api_or_model_availability()
     yield
     # Shutdown: release all database connections to prevent stale/leaked pools.

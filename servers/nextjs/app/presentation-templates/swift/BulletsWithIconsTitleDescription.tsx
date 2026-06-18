@@ -3,6 +3,7 @@ import * as z from "zod"
 
 import { IconSchema } from '../defaultSchemes';
 import { RemoteSvgIcon } from "@/app/hooks/useRemoteSvgIcon";
+import { inlineMarkdownToHtml } from '@/utils/inlineMarkdown';
 
 const layoutId = "bullet-with-icons-title-description"
 const layoutName = "Bullet With Icons Title Description"
@@ -190,9 +191,7 @@ const InfographicFourIcons: React.FC<SlideLayoutProps> = ({ data }) => {
                 </div>
               )}
               {slideData.sideParagraph && (
-                <div className="text-[14px] leading-[1.6]" style={{ color: "var(--background-text, #6B7280)" }}>
-                  {slideData.sideParagraph}
-                </div>
+                <div className="text-[14px] leading-[1.6]" style={{ color: "var(--background-text, #6B7280)" }} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(slideData.sideParagraph || "") }} />
               )}
             </div>
           </div>
@@ -221,9 +220,7 @@ const InfographicFourIcons: React.FC<SlideLayoutProps> = ({ data }) => {
                 <div className="mt-5 text-[16px] font-semibold" style={{ color: "var(--background-text, #111827)" }}>
                   {item.title}
                 </div>
-                <div className="mt-2 text-[13px] leading-[1.6] max-w-[260px]" style={{ color: "var(--background-text, #6B7280)" }}>
-                  {item.description}
-                </div>
+                <div className="mt-2 text-[13px] leading-[1.6] max-w-[260px]" style={{ color: "var(--background-text, #6B7280)" }} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(item.description || "") }} />
               </div>
             ))}
           </div>

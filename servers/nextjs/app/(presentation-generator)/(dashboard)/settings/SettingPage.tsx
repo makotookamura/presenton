@@ -19,11 +19,15 @@ import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 import SettingSideBar from "./SettingSideBar";
 import TextProvider from "./TextProvider";
 import ImageProvider from "./ImageProvider";
+import WebSearchProvider from "./WebSearchProvider";
 import PrivacySettings from "./PrivacySettings";
-import { IMAGE_PROVIDERS, LLM_PROVIDERS } from "@/utils/providerConstants";
+import {
+  IMAGE_PROVIDERS,
+  LLM_PROVIDERS,
+  WEB_SEARCH_PROVIDERS,
+} from "@/utils/providerConstants";
 import { ImagesApi } from "@/app/(presentation-generator)/services/api/images";
 import { getApiUrl } from "@/utils/api";
-import { toast } from "sonner";
 import LogoutButton from "@/components/Auth/LogoutButton";
 
 const STOCK_IMAGE_PROVIDERS = new Set(["pexels", "pixabay"]);
@@ -43,7 +47,7 @@ const SettingsPage = () => {
   const pathname = usePathname();
   const [mode, setMode] = useState<'nanobanana' | 'presenton'>('presenton')
   const [selectedProvider, setSelectedProvider] = useState<
-    "text-provider" | "image-provider" | "privacy" | "session"
+    "text-provider" | "image-provider" | "web-search-provider" | "privacy" | "session"
   >("text-provider");
   const userConfigState = useSelector((state: RootState) => state.userConfig);
   const [llmConfig, setLlmConfig] = useState<LLMConfig>(
@@ -78,7 +82,7 @@ const SettingsPage = () => {
       );
     }
     return 0;
-  }, [downloadingModel?.downloaded, downloadingModel?.size]);
+  }, [downloadingModel]);
 
   const ensureSelectedStockProviderReady = async (): Promise<boolean> => {
     if (llmConfig.DISABLE_IMAGE_GENERATION) {
@@ -132,7 +136,7 @@ const SettingsPage = () => {
     if (llmConfig.LLM === 'codex') {
       const isAuthenticated = await checkCurrentAuthStatus();
       if (!isAuthenticated) {
-        toast.error("Please sign in to ChatGPT to continue");
+        notify.error("Sign in required", "Please sign in to ChatGPT to continue.");
         return;
       }
     }
@@ -141,7 +145,14 @@ const SettingsPage = () => {
     });
     const validationError = getLLMConfigValidationError(llmConfig);
     if (validationError) {
-      notify.error("Cannot save settings", validationError);
+      notify.warning("Cannot save settings", validationError);
+      if (
+        selectedProvider === "image-provider" &&
+        llmConfig.LLM === "openai" &&
+        !String(llmConfig.OPENAI_MODEL || "").trim()
+      ) {
+        setSelectedProvider("text-provider");
+      }
       return;
     }
 
@@ -159,6 +170,7 @@ const SettingsPage = () => {
       }));
       trackEvent(MixpanelEvent.Settings_SaveConfiguration_API_Call);
       await handleSaveLLMConfig(llmConfig);
+      let ollamaModelDownloaded = false;
       if (llmConfig.LLM === "ollama" && llmConfig.OLLAMA_MODEL) {
         trackEvent(MixpanelEvent.Settings_CheckOllamaModelPulled_API_Call);
         const isPulled = await checkIfSelectedOllamaModelIsPulled(
@@ -178,11 +190,14 @@ const SettingsPage = () => {
           if (downloadOutcome === "cancelled") {
             return;
           }
+          ollamaModelDownloaded = downloadOutcome === "completed";
         }
       }
-      notify.info(
-        "Settings saved",
-        "Your configuration was saved successfully."
+      notify.success(
+        ollamaModelDownloaded ? "Settings saved and model ready" : "Settings saved",
+        ollamaModelDownloaded
+          ? "Your configuration was saved and the Ollama model finished downloading."
+          : "Your configuration was saved successfully."
       );
       setButtonState((prev) => ({
         ...prev,
@@ -263,10 +278,6 @@ const SettingsPage = () => {
       setTimeout(() => {
         setShowDownloadModal(false);
         setDownloadingModel(null);
-        notify.success(
-          "Model ready",
-          "The Ollama model finished downloading successfully."
-        );
       }, 2000);
     }
   }, [downloadingModel]);
@@ -289,15 +300,33 @@ const SettingsPage = () => {
       ? llmConfig.OPENAI_MODEL
       : textProviderKey === "google"
         ? llmConfig.GOOGLE_MODEL
-        : textProviderKey === "anthropic"
-          ? llmConfig.ANTHROPIC_MODEL
-          : textProviderKey === "ollama"
-            ? llmConfig.OLLAMA_MODEL
-            : textProviderKey === "custom"
-              ? llmConfig.CUSTOM_MODEL
-              : textProviderKey === "codex"
-                ? llmConfig.CODEX_MODEL
-                : "";
+        : textProviderKey === "vertex"
+          ? llmConfig.VERTEX_MODEL
+          : textProviderKey === "azure"
+            ? llmConfig.AZURE_OPENAI_MODEL
+          : textProviderKey === "bedrock"
+            ? llmConfig.BEDROCK_MODEL
+            : textProviderKey === "openrouter"
+              ? llmConfig.OPENROUTER_MODEL
+              : textProviderKey === "fireworks"
+                ? llmConfig.FIREWORKS_MODEL
+                : textProviderKey === "together"
+                  ? llmConfig.TOGETHER_MODEL
+              : textProviderKey === "cerebras"
+                ? llmConfig.CEREBRAS_MODEL
+                : textProviderKey === "litellm"
+                    ? llmConfig.LITELLM_MODEL
+                    : textProviderKey === "lmstudio"
+                      ? llmConfig.LMSTUDIO_MODEL
+                    : textProviderKey === "anthropic"
+                      ? llmConfig.ANTHROPIC_MODEL
+                      : textProviderKey === "ollama"
+                        ? llmConfig.OLLAMA_MODEL
+                        : textProviderKey === "custom"
+                          ? llmConfig.CUSTOM_MODEL
+                          : textProviderKey === "codex"
+                            ? llmConfig.CODEX_MODEL
+                            : "";
   const textSummary = selectedTextModel
     ? `${textProviderLabel} (${selectedTextModel})`
     : textProviderLabel;
@@ -308,11 +337,31 @@ const SettingsPage = () => {
       ? IMAGE_PROVIDERS[llmConfig.IMAGE_PROVIDER]?.label ||
       llmConfig.IMAGE_PROVIDER
       : "No image provider";
+  const webSearchProviderKey = (llmConfig.WEB_SEARCH_PROVIDER || "auto").toLowerCase();
+  const webSearchSummary = `Web: ${
+    WEB_SEARCH_PROVIDERS[webSearchProviderKey]?.label || webSearchProviderKey
+  }`;
 
 
   useEffect(() => {
 
-    if (llmConfig.LLM === "codex" && !llmConfig.CODEX_MODEL || llmConfig.LLM === "openai" && !llmConfig.OPENAI_MODEL || llmConfig.LLM === "google" && !llmConfig.GOOGLE_MODEL || llmConfig.LLM === "anthropic" && !llmConfig.ANTHROPIC_MODEL || llmConfig.LLM === "ollama" && !llmConfig.OLLAMA_MODEL || llmConfig.LLM === "custom" && !llmConfig.CUSTOM_MODEL) {
+    if (
+      (llmConfig.LLM === "codex" && !llmConfig.CODEX_MODEL) ||
+      (llmConfig.LLM === "openai" && !llmConfig.OPENAI_MODEL) ||
+      (llmConfig.LLM === "google" && !llmConfig.GOOGLE_MODEL) ||
+      (llmConfig.LLM === "vertex" && !llmConfig.VERTEX_MODEL) ||
+      (llmConfig.LLM === "azure" && !llmConfig.AZURE_OPENAI_MODEL) ||
+      (llmConfig.LLM === "bedrock" && !llmConfig.BEDROCK_MODEL) ||
+      (llmConfig.LLM === "openrouter" && !llmConfig.OPENROUTER_MODEL) ||
+      (llmConfig.LLM === "fireworks" && !llmConfig.FIREWORKS_MODEL) ||
+      (llmConfig.LLM === "together" && !llmConfig.TOGETHER_MODEL) ||
+      (llmConfig.LLM === "cerebras" && !llmConfig.CEREBRAS_MODEL) ||
+      (llmConfig.LLM === "litellm" && !llmConfig.LITELLM_MODEL) ||
+      (llmConfig.LLM === "lmstudio" && !llmConfig.LMSTUDIO_MODEL) ||
+      (llmConfig.LLM === "anthropic" && !llmConfig.ANTHROPIC_MODEL) ||
+      (llmConfig.LLM === "ollama" && !llmConfig.OLLAMA_MODEL) ||
+      (llmConfig.LLM === "custom" && !llmConfig.CUSTOM_MODEL)
+    ) {
       notify.error("Cannot save settings", "Please select a model for the selected provider");
 
       const currentUrl = window.location.href;
@@ -372,16 +421,6 @@ const SettingsPage = () => {
 
   return (
     <div className="h-screen font-syne flex flex-col overflow-hidden relative">
-      <div
-        className="fixed z-0 bottom-[-14.5rem] left-0 w-full h-full"
-        style={{
-          height: "341px",
-          borderRadius: "1440px",
-          background:
-            "radial-gradient(5.92% 104.69% at 50% 100%, rgba(122, 90, 248, 0.00) 0%, rgba(255, 255, 255, 0.00) 100%), radial-gradient(50% 50% at 50% 50%, rgba(122, 90, 248, 0.80) 0%, rgba(122, 90, 248, 0.00) 100%)",
-        }}
-      />
-
       <main className="w-full mx-auto gap-6   overflow-hidden flex ">
         <SettingSideBar
           mode={mode}
@@ -396,7 +435,7 @@ const SettingsPage = () => {
                 Settings
               </h3>
               <p className="text-[10px] px-2.5 py-0.5 rounded-[50px] text-[#7A5AF8] border border-[#EDEEEF]  font-medium ">
-                {textSummary} · {imageSummary}
+                {textSummary} · {imageSummary} · {webSearchSummary}
               </p>
             </div>
           </div>
@@ -416,6 +455,7 @@ const SettingsPage = () => {
             llmConfig={llmConfig}
           />}
           {mode === 'presenton' && selectedProvider === 'image-provider' && <ImageProvider llmConfig={llmConfig} setLlmConfig={setLlmConfig} />}
+          {mode === 'presenton' && selectedProvider === 'web-search-provider' && <WebSearchProvider llmConfig={llmConfig} setLlmConfig={setLlmConfig} />}
           {selectedProvider === 'privacy' && <PrivacySettings />}
           {selectedProvider === "session" && (
             <div className="w-full max-w-lg space-y-5 rounded-[20px] border border-[#EDEEEF] bg-white p-7">
